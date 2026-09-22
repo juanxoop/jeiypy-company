@@ -1,7 +1,7 @@
 /** Textos de las secciones de la home. */
 
 export const heroContent = {
-  eyebrow: "Estudio digital · Colombia",
+  eyebrow: "Tecnología a tu alcance",
   title: { lead: "Lleva tu negocio al", highlight: "mundo digital." },
   description: "Diseñamos experiencias digitales que convierten visitantes en clientes.",
   primaryCta: "Quiero digitalizar mi negocio",
@@ -13,8 +13,10 @@ export const problemContent = {
   eyebrow: "El problema",
   title: "Tu negocio merece mucho más que una página de Instagram.",
   description:
-    "Muchos negocios dependen solo de redes sociales y del voz a voz. Funcionan, pero no te pertenecen y no cuentan toda tu historia.",
+    "Las redes y el voz a voz funcionan, pero no te pertenecen y no cuentan toda tu historia.",
   todayLabel: "Hoy dependes de",
+  limitLabel: "Limitado",
+  footnote: "Muchos negocios dependen solo de redes sociales y recomendaciones. Es cómodo, pero limita.",
   channels: [
     { id: "instagram", name: "Instagram", note: "El algoritmo decide quién te ve." },
     { id: "facebook", name: "Facebook", note: "Tu información se pierde entre publicaciones." },

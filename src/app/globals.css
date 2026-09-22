@@ -30,6 +30,8 @@
   --animate-jp-float: jp-float 9s ease-in-out infinite;
   --animate-jp-scan: jp-scan 7s var(--ease-jeipy) infinite;
   --animate-jp-twinkle: jp-twinkle 6s ease-in-out infinite;
+  --animate-jp-ring: jp-ring 4.4s var(--ease-jeipy) infinite;
+  --animate-jp-stage: jp-stage 1.4s var(--ease-jeipy) both;
 
   @keyframes jp-pulse {
     0% { box-shadow: 0 0 0 0 rgb(84 168 255 / 0.45); }
@@ -51,6 +53,15 @@
     0% { transform: translateX(-100%); opacity: 0; }
     15% { opacity: 1; }
     60%, 100% { transform: translateX(400%); opacity: 0; }
+  }
+  @keyframes jp-ring {
+    0% { transform: scale(0.72); opacity: 0; }
+    30% { opacity: 1; }
+    100% { transform: scale(1.35); opacity: 0; }
+  }
+  @keyframes jp-stage {
+    from { opacity: 0; transform: perspective(1400px) rotateX(14deg) translate3d(0, 48px, 0); }
+    to { opacity: 1; transform: perspective(1400px) rotateX(0) translate3d(0, 0, 0); }
   }
   @keyframes jp-twinkle {
     0%, 100% { opacity: 0.15; }

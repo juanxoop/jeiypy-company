@@ -95,7 +95,7 @@ export function Navbar() {
 
         <div className="flex items-center gap-2">
           <div className="hidden lg:block">
-            <ButtonLink href={contactHref} variant="secondary" withArrow>
+            <ButtonLink href={contactHref} withArrow>
               Empezar proyecto
             </ButtonLink>
           </div>
