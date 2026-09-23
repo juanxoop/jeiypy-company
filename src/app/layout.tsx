@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import { MotionProvider } from "@/components/motion/MotionProvider";
+import { AssistantLauncher } from "@/features/assistant/components/AssistantLauncher";
 import { siteConfig } from "@/config/site";
 import "./globals.css";
 
@@ -54,7 +55,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         >
           Saltar al contenido
         </a>
-        <MotionProvider>{children}</MotionProvider>
+        <MotionProvider>
+          {children}
+          <AssistantLauncher />
+        </MotionProvider>
       </body>
     </html>
   );

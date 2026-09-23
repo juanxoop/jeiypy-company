@@ -276,3 +276,39 @@
   from { background-position: 150% 0; }
   to { background-position: -50% 0; }
 }
+
+/* ------------------------------------------------------------------
+   Jeipy AI: orbe y conversación
+   ------------------------------------------------------------------ */
+.jp-orb .jp-orb-core {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: jp-orb-breathe 4.8s ease-in-out infinite;
+}
+.jp-orb .jp-orb-light {
+  animation: jp-orb-orbit 7s linear infinite;
+}
+.jp-orb[data-state="thinking"] .jp-orb-core {
+  animation-duration: 1.1s;
+}
+.jp-orb[data-state="thinking"] .jp-orb-light {
+  animation-duration: 1.5s;
+}
+.jp-orb-still .jp-orb-core,
+.jp-orb-still .jp-orb-light {
+  animation: none;
+}
+.jp-typing-dot {
+  animation: jp-typing 1.2s ease-in-out infinite;
+}
+@keyframes jp-orb-breathe {
+  0%, 100% { opacity: 0.72; transform: scale(0.88); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+@keyframes jp-orb-orbit {
+  to { stroke-dashoffset: -100; }
+}
+@keyframes jp-typing {
+  0%, 70%, 100% { opacity: 0.25; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-2px); }
+}

@@ -1,4 +1,4 @@
-import { SparkIcon } from "@/components/icons/BrandIcons";
+import { AssistantOrb } from "@/features/assistant/components/AssistantOrb";
 import { jeipyAi, type PlanAi } from "@/data/plans";
 import { cn } from "@/lib/cn";
 
@@ -11,7 +11,7 @@ export function JeipyAiBlock({ ai, className }: { ai: PlanAi; className?: string
     return (
       <p className={cn("flex items-center justify-between gap-3 rounded-xl border border-line px-4 py-3 text-sm", className)}>
         <span className="inline-flex items-center gap-2.5 text-mist">
-          <SparkIcon className="size-3.5 text-mist/60" />
+          <AssistantOrb still className="size-4 opacity-50 grayscale" />
           {jeipyAi.name}
         </span>
         <span className="font-mono text-[10px] uppercase tracking-wider text-mist/70">{ai.tag}</span>
@@ -52,9 +52,7 @@ export function JeipyAiBlock({ ai, className }: { ai: PlanAi; className?: string
 
       <div className="relative">
         <div className="flex items-center gap-3">
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-jeipy/20 text-glow ring-1 ring-glow/35 shadow-[0_6px_20px_-8px_rgb(23_105_255/0.8)]">
-            <SparkIcon className="size-[18px]" />
-          </span>
+          <AssistantOrb className="size-10 drop-shadow-[0_6px_16px_rgb(23_105_255/0.45)]" />
           <div>
             <p className="font-semibold tracking-[-0.01em] text-snow">{jeipyAi.name}</p>
             <p className="text-xs text-glow">{jeipyAi.tagline}</p>

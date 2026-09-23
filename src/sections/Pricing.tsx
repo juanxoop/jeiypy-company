@@ -1,4 +1,4 @@
-import { SparkIcon } from "@/components/icons/BrandIcons";
+import { AssistantOrb } from "@/features/assistant/components/AssistantOrb";
 import { Reveal, RevealGroup, RevealItem } from "@/components/motion/Reveal";
 import { Container } from "@/components/ui/Container";
 import { PlanCard } from "@/components/ui/PlanCard";
@@ -43,7 +43,7 @@ export function Pricing() {
               </li>
             ))}
             <li className="flex items-start gap-2.5 sm:items-center">
-              <SparkIcon className="mt-0.5 size-4 shrink-0 text-glow sm:mt-0" />
+              <AssistantOrb still className="mt-0.5 size-4 sm:mt-0" />
               {jeipyAi.costNote}
             </li>
           </ul>
