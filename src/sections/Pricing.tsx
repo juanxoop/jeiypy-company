@@ -4,7 +4,7 @@ import { PlanCard } from "@/components/ui/PlanCard";
 import { Section } from "@/components/ui/Section";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { pricingContent } from "@/data/home";
-import { plans } from "@/data/plans";
+import { jeipyAi, plans } from "@/data/plans";
 
 export function Pricing() {
   return (
@@ -22,22 +22,27 @@ export function Pricing() {
           titleId="planes-title"
         />
 
-        <RevealGroup as="ul" className="mx-auto mt-14 grid max-w-md gap-4 sm:mt-20 lg:max-w-none lg:grid-cols-3 lg:items-center">
-          {plans.map((plan) => (
+        <RevealGroup as="ul" className="mx-auto mt-14 grid max-w-xl gap-5 sm:mt-20 lg:max-w-none lg:grid-cols-[1fr_1fr_1.28fr] lg:gap-4 xl:gap-5">
+          {plans.map((plan, index) => (
             <RevealItem as="li" key={plan.id} className="h-full">
-              <PlanCard plan={plan} />
+              <PlanCard plan={plan} index={index} />
             </RevealItem>
           ))}
         </RevealGroup>
 
         <Reveal>
-          <p className="mx-auto mt-12 flex max-w-md items-center justify-center gap-2.5 text-center text-sm text-mist">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden className="size-4 shrink-0 text-glow">
-              <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M8 7.2v3.6M8 5.2h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            {pricingContent.disclaimer}
-          </p>
+          <ul className="mx-auto mt-12 flex max-w-3xl flex-col gap-3 text-sm text-mist sm:items-center sm:text-center">
+            {pricingContent.notes.map((note) => (
+              <li key={note} className="flex items-start gap-2.5 sm:items-center">
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden className="mt-0.5 size-4 shrink-0 text-glow sm:mt-0">
+                  <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.3" />
+                  <path d="M8 7.2v3.6M8 5.2h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+                {note}
+              </li>
+            ))}
+          </ul>
+          <p className="mx-auto mt-4 max-w-2xl text-xs leading-relaxed text-mist/70 sm:text-center">{jeipyAi.costNote}</p>
         </Reveal>
       </Container>
     </Section>

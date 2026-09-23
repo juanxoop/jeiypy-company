@@ -55,8 +55,11 @@ export const portfolioContent = {
 export const pricingContent = {
   eyebrow: "Planes",
   title: "Una inversión clara para cada etapa de tu negocio.",
-  description: "Precios orientativos para empezar la conversación.",
-  disclaimer: "El precio final depende de las necesidades de cada proyecto.",
+  description: "Precios orientativos para empezar la conversación. Cada plan se adapta a tu negocio.",
+  notes: [
+    "El precio final depende del alcance, funcionalidades e integraciones de cada proyecto.",
+    "Jeipy AI puede requerir una mensualidad adicional según uso y complejidad.",
+  ],
 } as const;
 
 export const processContent = {

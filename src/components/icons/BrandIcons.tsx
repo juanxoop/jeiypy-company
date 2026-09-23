@@ -53,3 +53,22 @@ export function CheckIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+/** Destello de Jeipy AI: una estrella principal y una secundaria que se mueve con el hover del grupo. */
+export function SparkIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden className={cn("size-4", className)}>
+      <path
+        d="M10 3.5c.5 3.6 2.4 5.5 6 6-3.6.5-5.5 2.4-6 6-.5-3.6-2.4-5.5-6-6 3.6-.5 5.5-2.4 6-6Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M18 14.5c.25 1.7 1.05 2.5 2.75 2.75-1.7.25-2.5 1.05-2.75 2.75-.25-1.7-1.05-2.5-2.75-2.75 1.7-.25 2.5-1.05 2.75-2.75Z"
+        fill="currentColor"
+        className="origin-center transition-transform duration-500 ease-(--ease-jeipy) [transform-box:fill-box] group-hover:rotate-45 group-hover:scale-110"
+      />
+    </svg>
+  );
+}
