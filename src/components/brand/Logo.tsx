@@ -18,7 +18,7 @@ export function Logo({ className, withWordmark = true, href = "#inicio", onClick
       aria-label={`${siteConfig.name}, ir al inicio`}
       className={cn("group inline-flex items-center gap-2.5 rounded-lg text-snow", className)}
     >
-      <JpMark tile className="size-9 transition-transform duration-500 ease-(--ease-jeipy) group-hover:-rotate-3" />
+      <JpMark shine preload sizes="36px" className="size-9" />
       {withWordmark && (
         <span className="text-[15px] font-semibold tracking-tight whitespace-nowrap">
           Jeipy<span className="text-mist font-medium"> Company</span>

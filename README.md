@@ -31,7 +31,7 @@ Copia `.env.example` a `.env.local` y define `NEXT_PUBLIC_SITE_URL` con el domin
 | Pasos del proceso | `src/data/process.ts` |
 | Proyectos del portafolio | `src/data/projects.ts` |
 | Colores, curvas y animaciones | `src/app/globals.css` (`@theme`) |
-| Símbolo JP | `src/components/brand/mark-paths.ts` y `src/app/icon.svg` |
+| Isotipo JP (oficial) | `src/assets/brand/source/jp-isotipo-original.png` + `node scripts/generate-brand-assets.mjs` |
 
 **WhatsApp:** mientras `whatsappNumber` esté vacío, todos los CTA llevan a `#contacto`.
 Al definirlo (formato internacional sin `+`, p. ej. `57` + 10 dígitos) abren WhatsApp con un
@@ -43,8 +43,12 @@ mensaje prellenado según el botón (cada plan envía su propio mensaje).
 siempre como "Concepto / Demo". Para mostrar una captura real, agrega `image` (archivo en
 `public/projects/`); si no hay `href`, el botón indica "Demo en preparación".
 
-**Logo oficial:** cuando exista el SVG definitivo, reemplaza los trazos de `mark-paths.ts`
-(header, footer, hero, loading, apple-icon y OG image lo usan) y `src/app/icon.svg` (favicon).
+**Isotipo oficial:** el archivo fuente vive en `src/assets/brand/source/jp-isotipo-original.png`.
+`node scripts/generate-brand-assets.mjs` genera, sin alterar el símbolo (solo recorta el margen
+transparente y redimensiona), todos los derivados: `src/assets/brand/jp-isotipo.png` (usado por
+`<JpMark />` en navbar, hero, footer, marcas de agua y 404), el favicon `src/app/icon.png`,
+`src/app/apple-icon.png`, los iconos del manifest y la silueta `public/brand/jp-mask.png`
+del destello metálico. La imagen Open Graph también usa el isotipo.
 
 ## Arquitectura
 
@@ -55,13 +59,15 @@ src/
   data/           contenido editable (textos, servicios, planes, proceso, proyectos)
   sections/       secciones de la home (Hero, Problem, Services, Portfolio, Pricing, Process, FinalCta)
   components/
-    brand/        símbolo JP y logo
+    brand/        isotipo JP (<JpMark />), logo y símbolo del hero
     layout/       Navbar, MobileMenu, Footer
     motion/       MotionProvider y Reveal
     ui/           primitivas reutilizables (Button, Card, SectionHeading, PlanCard, ProjectCard…)
     icons/        iconografía lineal propia
     visuals/      fondos y composiciones ilustradas
   lib/            utilidades (contacto/WhatsApp, hooks, tokens de movimiento)
+  assets/brand/   isotipo oficial (fuente y versión optimizada)
+scripts/          generación de recursos de marca
 ```
 
 ## Sistema de microanimación

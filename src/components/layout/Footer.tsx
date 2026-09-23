@@ -12,10 +12,9 @@ export function Footer() {
 
   return (
     <footer className="relative overflow-hidden border-t border-line">
-      <JpMark
-        mono
-        className="pointer-events-none absolute -right-16 -bottom-24 size-[22rem] text-snow opacity-[0.025] sm:size-[28rem]"
-      />
+      <div aria-hidden className="pointer-events-none absolute -right-16 -bottom-24 opacity-[0.045]">
+        <JpMark sizes="448px" className="size-[22rem] sm:size-[28rem]" />
+      </div>
       <Container className="relative py-14 sm:py-16">
         <div className="flex flex-col gap-12 md:flex-row md:items-start md:justify-between">
           <div className="max-w-xs">

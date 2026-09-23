@@ -16,7 +16,7 @@ const organizationJsonLd = {
   slogan: siteConfig.slogan,
   description: siteConfig.seo.description,
   url: siteConfig.url,
-  logo: `${siteConfig.url}/icon.svg`,
+  logo: `${siteConfig.url}/brand/icon-512.png`,
   areaServed: { "@type": "Country", name: siteConfig.country },
   knowsAbout: ["Diseño web", "Landing pages", "Catálogos digitales", "SEO básico"],
 };

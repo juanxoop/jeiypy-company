@@ -17,10 +17,9 @@ export function FinalCta() {
       <div aria-hidden className="pointer-events-none absolute inset-0">
         <div className="absolute inset-0 jp-grid opacity-50 [mask-image:radial-gradient(ellipse_60%_55%_at_50%_100%,#000,transparent)]" />
         <div className="absolute bottom-[-30%] left-1/2 h-[80%] w-[110%] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgb(23_105_255/0.28),rgb(13_71_199/0.12)_55%,transparent)] blur-2xl animate-jp-drift" />
-        <JpMark
-          mono
-          className="absolute top-1/2 left-1/2 size-[36rem] -translate-x-1/2 -translate-y-1/2 text-snow opacity-[0.03] sm:size-[48rem]"
-        />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-[0.04]">
+          <JpMark sizes="768px" className="size-[36rem] sm:size-[48rem]" />
+        </div>
       </div>
 
       <Container className="relative text-center">

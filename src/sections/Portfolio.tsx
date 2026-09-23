@@ -30,7 +30,9 @@ export function Portfolio() {
 
           <Reveal delay={0.08}>
             <div className="relative flex flex-col items-start gap-6 overflow-hidden rounded-3xl border border-dashed border-line-strong p-7 sm:flex-row sm:items-center sm:justify-between sm:p-10">
-              <JpMark mono className="pointer-events-none absolute -right-6 -bottom-10 size-44 text-snow opacity-[0.035]" />
+              <div aria-hidden className="pointer-events-none absolute -right-6 -bottom-10 opacity-[0.05]">
+                <JpMark sizes="176px" className="size-44" />
+              </div>
               <div className="relative max-w-xl">
                 <p className="text-xl font-semibold tracking-[-0.02em] text-snow sm:text-2xl">{portfolioContent.nextSlot.title}</p>
                 <p className="mt-2 text-mist">{portfolioContent.nextSlot.text}</p>

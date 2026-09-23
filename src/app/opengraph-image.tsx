@@ -1,12 +1,16 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { ImageResponse } from "next/og";
-import { MarkImage } from "@/components/brand/MarkImage";
 import { siteConfig } from "@/config/site";
 
 export const alt = siteConfig.seo.title;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-export default function OpengraphImage() {
+export default async function OpengraphImage() {
+  const isotipo = await readFile(join(process.cwd(), "src/assets/brand/jp-isotipo.png"));
+  const isotipoSrc = `data:image/png;base64,${isotipo.toString("base64")}`;
+
   return new ImageResponse(
     (
       <div
@@ -22,7 +26,7 @@ export default function OpengraphImage() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-          <MarkImage size={72} />
+          <img src={isotipoSrc} width={88} height={88} alt="" />
           <span style={{ fontSize: 30, fontWeight: 600, letterSpacing: -0.5 }}>{siteConfig.name}</span>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
