@@ -1,3 +1,4 @@
+import { SparkIcon } from "@/components/icons/BrandIcons";
 import { Reveal, RevealGroup, RevealItem } from "@/components/motion/Reveal";
 import { Container } from "@/components/ui/Container";
 import { PlanCard } from "@/components/ui/PlanCard";
@@ -22,7 +23,7 @@ export function Pricing() {
           titleId="planes-title"
         />
 
-        <RevealGroup as="ul" className="mx-auto mt-14 grid max-w-xl gap-5 sm:mt-20 lg:max-w-none lg:grid-cols-[1fr_1fr_1.28fr] lg:gap-4 xl:gap-5">
+        <RevealGroup as="ul" className="mx-auto mt-14 grid max-w-xl gap-5 sm:mt-20 lg:max-w-none lg:grid-cols-[1fr_1fr_1.25fr] lg:gap-4 xl:gap-5">
           {plans.map((plan, index) => (
             <RevealItem as="li" key={plan.id} className="h-full">
               <PlanCard plan={plan} index={index} />
@@ -31,7 +32,7 @@ export function Pricing() {
         </RevealGroup>
 
         <Reveal>
-          <ul className="mx-auto mt-12 flex max-w-3xl flex-col gap-3 text-sm text-mist sm:items-center sm:text-center">
+          <ul className="mx-auto mt-12 flex max-w-3xl flex-col gap-3 text-sm leading-relaxed text-mist sm:items-center sm:text-center">
             {pricingContent.notes.map((note) => (
               <li key={note} className="flex items-start gap-2.5 sm:items-center">
                 <svg viewBox="0 0 16 16" fill="none" aria-hidden className="mt-0.5 size-4 shrink-0 text-glow sm:mt-0">
@@ -41,8 +42,11 @@ export function Pricing() {
                 {note}
               </li>
             ))}
+            <li className="flex items-start gap-2.5 sm:items-center">
+              <SparkIcon className="mt-0.5 size-4 shrink-0 text-glow sm:mt-0" />
+              {jeipyAi.costNote}
+            </li>
           </ul>
-          <p className="mx-auto mt-4 max-w-2xl text-xs leading-relaxed text-mist/70 sm:text-center">{jeipyAi.costNote}</p>
         </Reveal>
       </Container>
     </Section>

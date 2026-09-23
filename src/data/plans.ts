@@ -5,17 +5,18 @@
 
 /** Cómo se relaciona cada plan con Jeipy AI. */
 export type PlanAi =
-  | { mode: "none"; label: string }
-  | { mode: "addon"; title: string; tag: string; description: string; note: string }
+  | { mode: "none"; tag: string }
+  | { mode: "addon"; tag: string; description: string; note: string }
   | {
       mode: "featured";
-      title: string;
       tag: string;
-      description: string;
-      capabilitiesLabel: string;
-      capabilities: string[];
+      headline: string;
+      /** Capacidades agrupadas por el resultado de negocio que producen. */
+      groups: { label: string; items: string[] }[];
       note: string;
     };
+
+export type PlanCtaIntent = "start" | "choose" | "talk";
 
 export type Plan = {
   id: "basico" | "esencial" | "premium";
@@ -25,7 +26,7 @@ export type Plan = {
   summary: string;
   features: string[];
   ai: PlanAi;
-  cta: { label: string; message: string };
+  cta: { label: string; intent: PlanCtaIntent; message: string };
   highlight?: string;
 };
 
@@ -33,7 +34,7 @@ export const jeipyAi = {
   name: "Jeipy AI",
   tagline: "Asistente inteligente para tu negocio",
   costNote:
-    "La automatización con IA puede requerir configuración inicial y una mensualidad según el uso, complejidad e integraciones del proyecto.",
+    "Jeipy AI puede requerir configuración inicial y una mensualidad según uso, complejidad e integraciones.",
 } as const;
 
 export const plans: Plan[] = [
@@ -42,48 +43,42 @@ export const plans: Plan[] = [
     name: "Básico",
     price: "$600.000",
     currency: "COP",
-    summary:
-      "Una página profesional y clara para empezar tu presencia digital con una base sólida, bien diseñada y lista para recibir clientes.",
+    summary: "Una página profesional y clara para empezar tu presencia digital con una base sólida.",
     features: [
       "Página web informativa",
       "Diseño responsive",
       "Información del negocio",
       "Integración con WhatsApp",
-      "Ubicación",
-      "Información de contacto",
+      "Ubicación y contacto",
       "Estructura visual profesional",
       "Optimización básica de rendimiento",
     ],
-    ai: { mode: "none", label: "No incluye automatización con IA" },
-    cta: { label: "Empezar con Básico", message: "Hola Jeipy, me interesa el plan Básico." },
+    ai: { mode: "none", tag: "No incluido" },
+    cta: { label: "Empezar con Básico", intent: "start", message: "Hola Jeipy, me interesa el plan Básico." },
   },
   {
     id: "esencial",
     name: "Esencial",
     price: "$1.000.000",
     currency: "COP",
-    summary:
-      "Una presencia digital más completa, con herramientas pensadas para mostrar todo lo que ofreces y captar más clientes.",
+    summary: "Una web más completa, con herramientas para mostrar lo que ofreces y captar clientes.",
     features: [
       "Sitio web más completo",
       "Varias secciones",
       "Catálogo de productos o servicios",
       "Formularios de contacto o cotización",
-      "SEO básico",
-      "Analytics",
+      "SEO básico y Analytics",
       "Integración con WhatsApp",
-      "Optimización de velocidad y experiencia",
+      "Velocidad y experiencia optimizadas",
       "Diseño responsive",
     ],
     ai: {
       mode: "addon",
-      title: jeipyAi.name,
       tag: "Opcional",
-      description:
-        "Asistente inteligente para responder preguntas frecuentes, orientar visitantes y ayudar a convertir consultas en contactos.",
-      note: "No incluido en el precio base. Se cotiza según el proyecto.",
+      description: "Responde preguntas frecuentes, orienta visitantes y convierte consultas en contactos.",
+      note: "Se cotiza aparte del precio base.",
     },
-    cta: { label: "Elegir Esencial", message: "Hola Jeipy, me interesa el plan Esencial." },
+    cta: { label: "Elegir Esencial", intent: "choose", message: "Hola Jeipy, me interesa el plan Esencial." },
     highlight: "Más popular",
   },
   {
@@ -91,42 +86,30 @@ export const plans: Plan[] = [
     name: "Premium",
     price: "$1.500.000",
     currency: "COP",
-    summary:
-      "Una solución más personalizada y automatizada, preparada para acompañar el crecimiento de tu negocio.",
+    summary: "Una solución personalizada y automatizada, preparada para acompañar tu crecimiento.",
     features: [
       "Diseño web avanzado",
-      "Desarrollo más personalizado",
+      "Desarrollo personalizado",
       "Catálogo avanzado",
-      "Formularios o flujos personalizados",
+      "Formularios y flujos a medida",
       "Integraciones",
-      "SEO básico",
-      "Analytics",
+      "SEO básico y Analytics",
       "Optimización avanzada",
-      "Soporte",
-      "Acompañamiento",
+      "Soporte y acompañamiento",
       "Actualizaciones",
       "Diseño responsive",
     ],
     ai: {
       mode: "featured",
-      title: jeipyAi.name,
-      tag: jeipyAi.tagline,
-      description:
-        "Un asistente para tu negocio capaz de responder dudas, orientar clientes, recopilar información y apoyar tus procesos comerciales.",
-      capabilitiesLabel: "Puede incluir, según el proyecto",
-      capabilities: [
-        "Preguntas frecuentes",
-        "Información de productos o servicios",
-        "Captación de leads",
-        "Formularios conversacionales",
-        "Recomendaciones",
-        "Clasificación inicial de clientes",
-        "Paso a WhatsApp",
-        "Reservas o agendamiento",
-        "Automatizaciones personalizadas",
+      tag: "Según alcance",
+      headline: "Responde dudas, orienta clientes y captura oportunidades mientras tú atiendes tu negocio.",
+      groups: [
+        { label: "Atiende", items: ["Preguntas frecuentes", "Productos y servicios", "Recomendaciones"] },
+        { label: "Capta", items: ["Captación de leads", "Formularios conversacionales", "Clasificación de clientes"] },
+        { label: "Conecta", items: ["Paso a WhatsApp", "Reservas o agendamiento", "Automatizaciones a medida"] },
       ],
-      note: "Las funciones que dependen de servicios externos, como agendas o WhatsApp, se implementan según las herramientas y necesidades de cada proyecto.",
+      note: "Automatizaciones avanzadas e integraciones externas según el alcance del proyecto.",
     },
-    cta: { label: "Hablar sobre Premium", message: "Hola Jeipy, quiero hablar sobre el plan Premium." },
+    cta: { label: "Hablar sobre Premium", intent: "talk", message: "Hola Jeipy, quiero hablar sobre el plan Premium." },
   },
 ];
