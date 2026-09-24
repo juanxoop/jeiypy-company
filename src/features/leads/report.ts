@@ -3,15 +3,19 @@
  * Funciones puras: se usan en el servidor para el correo y la base de datos.
  */
 import { getAiTier } from "@/data/jeipyAi";
+import { businessRef } from "@/features/assistant/nlu";
 import { plans } from "@/data/plans";
-import { GOAL_LABEL, WEBSITE_LABEL, needsLabels } from "./labels";
+import { CHANNEL_LABEL, GOAL_LABEL, needsLabels, presenceLabel } from "./labels";
 import type { ContactChannel, LeadIntent, LeadStatus, LeadSubmission } from "./types";
 
 export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   nuevo: "Nuevo",
+  contactado: "Contactado",
   interesado: "Interesado",
   cotizacion: "Cotización",
   "solicita-llamada": "Solicita llamada",
+  cerrado: "Cerrado",
+  "no-interesado": "No interesado",
 };
 
 export const LEAD_INTENT_LABEL: Record<LeadIntent, string> = {
@@ -19,7 +23,7 @@ export const LEAD_INTENT_LABEL: Record<LeadIntent, string> = {
   callback: "Solicita una llamada",
 };
 
-export const CHANNEL_LABEL: Record<ContactChannel, string> = {
+export const CONTACT_CHANNEL_LABEL: Record<ContactChannel, string> = {
   whatsapp: "WhatsApp",
   llamada: "Llamada",
   correo: "Correo",
@@ -61,12 +65,15 @@ const GOAL_PHRASE = {
 
 /** "El cliente busca conseguir más clientes para su barbería…" */
 export function buildNarrative(lead: LeadSubmission): string {
-  const business = lead.businessType ? `su ${lead.businessType}` : "su negocio";
+  const business = businessRef(lead.businessType, "su");
   const sentences: string[] = [];
   sentences.push(lead.goal ? `El cliente busca ${GOAL_PHRASE[lead.goal]} para ${business}.` : `El cliente quiere digitalizar ${business}.`);
-  if (lead.website === "social") sentences.push("Hoy trabaja solo con redes y WhatsApp.");
-  if (lead.website === "no") sentences.push("Aún no tiene página web.");
-  if (lead.website === "yes") sentences.push("Ya tiene página web y quiere mejorarla.");
+  const channels = lead.channels.filter((c) => c !== "website" && c !== "none").map((c) => CHANNEL_LABEL[c]);
+  if (lead.websiteStatus === "none") {
+    sentences.push(channels.length ? `Hoy trabaja con ${joinNatural(channels)}, sin página web propia.` : "Aún no tiene presencia digital.");
+  } else if (lead.websiteStatus === "outdated") sentences.push("Ya tiene página web, pero está desactualizada: no parte de cero, necesita renovarla.");
+  else if (lead.websiteStatus === "needs_improvement") sentences.push("Ya tiene página web, pero necesita mejorarla.");
+  else if (lead.websiteStatus === "existing") sentences.push(`Ya tiene página web${channels.length ? ` y usa ${joinNatural(channels)}` : ""}.`);
   const needs = needsLabels(lead.goal, lead.features);
   if (needs.length) sentences.push(`Necesita ${joinNatural(needs)}.`);
   if (lead.aiInterest) {
@@ -97,8 +104,9 @@ export function buildReport(lead: LeadSubmission, status: LeadStatus): string {
     ["Negocio", business || undefined],
     ["Teléfono", lead.phone],
     ["Email", lead.email],
-    ["Canal preferido", lead.preferredChannel ? CHANNEL_LABEL[lead.preferredChannel] : undefined],
-    ["Situación actual", lead.website ? WEBSITE_LABEL[lead.website] : undefined],
+    ["Canal preferido", lead.preferredChannel ? CONTACT_CHANNEL_LABEL[lead.preferredChannel] : undefined],
+    ["Presencia digital", presenceLabel(lead.channels, lead.websiteStatus)],
+    ["Descripción", lead.businessDescription],
     ["Objetivo", lead.goal ? GOAL_LABEL[lead.goal] : undefined],
     ["Necesita", needs.length ? needs.join(" + ") : undefined],
     ["Interés en IA", aiInterestLabel(lead)],

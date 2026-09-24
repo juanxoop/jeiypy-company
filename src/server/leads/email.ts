@@ -1,12 +1,15 @@
 import "server-only";
-import { CHANNEL_LABEL, LEAD_STATUS_LABEL, recommendationLabel } from "@/features/leads/report";
+import { siteConfig } from "@/config/site";
+import { presenceLabel } from "@/features/leads/labels";
+import { CONTACT_CHANNEL_LABEL, LEAD_STATUS_LABEL, recommendationLabel } from "@/features/leads/report";
 import type { LeadRecord } from "@/features/leads/types";
 
 const escape = (value: string) =>
   value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 /** Correo para el equipo: el resumen comercial primero, el historial al final. */
-export function renderLeadEmail(lead: LeadRecord) {
+export function renderLeadEmail(lead: LeadRecord, id?: string) {
+  const inboxUrl = id ? `${siteConfig.url}/admin/leads/${id}` : `${siteConfig.url}/admin/leads`;
   const prefix = lead.callbackRequested ? "📞 Solicita llamada" : lead.status === "cotizacion" ? "Cotización" : "Nuevo lead";
   const business = lead.businessName ?? lead.businessType ?? "negocio sin especificar";
   const subject = `${lead.isUpdate ? "Actualización · " : ""}${prefix} — ${lead.name} · ${business}`;
@@ -18,7 +21,8 @@ export function renderLeadEmail(lead: LeadRecord) {
     ["Negocio", [lead.businessName, lead.businessType].filter(Boolean).join(" · ") || "—"],
     ["Teléfono", lead.phone],
     ...(lead.email ? ([["Email", lead.email]] as [string, string][]) : []),
-    ...(lead.preferredChannel ? ([["Canal preferido", CHANNEL_LABEL[lead.preferredChannel]]] as [string, string][]) : []),
+    ...(lead.preferredChannel ? ([["Canal preferido", CONTACT_CHANNEL_LABEL[lead.preferredChannel]]] as [string, string][]) : []),
+    ["Presencia digital", presenceLabel(lead.channels, lead.websiteStatus) ?? "—"],
     ["Necesita", lead.needs.join(" + ") || "—"],
     ["Interés en IA", lead.aiInterest ? `Sí${lead.aiLevel === "advanced" ? " · automatización avanzada" : " · atención básica"}` : "No por ahora"],
     ["Recomendación", recommendationLabel(lead) ?? "—"],
@@ -47,6 +51,7 @@ export function renderLeadEmail(lead: LeadRecord) {
     </div>
     <div style="margin-top:18px">
       <a href="tel:${phoneDigits}" style="display:inline-block;background:#1769ff;color:#fff;text-decoration:none;padding:10px 16px;border-radius:999px;font-size:14px;font-weight:600">Llamar</a>
+      <a href="${escape(inboxUrl)}" style="display:inline-block;margin-right:8px;background:#05070b;color:#fff;text-decoration:none;padding:10px 16px;border-radius:999px;font-size:14px;font-weight:600">Abrir en la bandeja</a>
       <a href="https://wa.me/${phoneDigits.length === 10 ? `57${phoneDigits}` : phoneDigits}" style="display:inline-block;margin-left:8px;color:#1769ff;text-decoration:none;padding:10px 16px;border:1px solid #1769ff;border-radius:999px;font-size:14px;font-weight:600">WhatsApp</a>
     </div>
     ${
@@ -58,6 +63,6 @@ export function renderLeadEmail(lead: LeadRecord) {
   </div>
 </div></body></html>`;
 
-  const text = [lead.report, ...(transcriptText ? ["", "— Conversación —", transcriptText] : [])].join("\n");
+  const text = [lead.report, "", `Bandeja: ${inboxUrl}`, ...(transcriptText ? ["", "— Conversación —", transcriptText] : [])].join("\n");
   return { subject, html, text };
 }

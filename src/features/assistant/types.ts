@@ -11,7 +11,20 @@ export type AiTierId = JeipyAiTierId;
    --------------------------------------------------------------- */
 
 export type Goal = "clients" | "image" | "showcase" | "sell" | "automate";
-export type WebsiteStatus = "yes" | "no" | "social";
+/** Canales donde el negocio ya tiene presencia (varios a la vez). */
+export type DigitalChannel =
+  | "whatsapp"
+  | "instagram"
+  | "facebook"
+  | "tiktok"
+  | "google_business"
+  | "website"
+  | "ecommerce"
+  | "other"
+  | "none";
+
+/** Estado de la página web actual del negocio. */
+export type WebsiteStatus = "none" | "existing" | "outdated" | "needs_improvement";
 /**
  * Capacidades que puede necesitar el negocio.
  * `automation`: cotizaciones automatizadas, clasificación o seguimiento de clientes, flujos y procesos comerciales.
@@ -31,8 +44,13 @@ export type FeatureMap = Partial<Record<Feature, boolean>>;
 export type Budget = { amount: number } | "skipped";
 
 export type Profile = {
+  /** Rubro, en palabras simples ("venta de calzado", "ferretería"); puede ser cualquier negocio. */
   businessType?: string;
-  website?: WebsiteStatus;
+  /** Lo que el visitante contó sobre qué vende o cómo funciona, con sus palabras. */
+  businessDescription?: string;
+  /** Presencia digital actual (existingDigitalChannels). */
+  channels?: DigitalChannel[];
+  websiteStatus?: WebsiteStatus;
   goal?: Goal;
   features: FeatureMap;
   budget?: Budget;

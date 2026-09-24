@@ -42,8 +42,13 @@ export async function submitLead(lead: LeadDraft, messages: ChatMessage[]): Prom
       body: JSON.stringify({ ...lead, transcript: toTranscript(messages) }),
     });
     const result = (await response.json().catch(() => null)) as LeadSubmitResult | null;
-    return result ?? { ok: false, error: "failed" };
-  } catch {
+    // Éxito solo con la confirmación del servidor (id del lead guardado en la base de datos).
+    if (response.ok && result?.ok && result.id) return result;
+    const failure = result && !result.ok ? result : { ok: false as const, error: "failed" as const };
+    console.error(`[Jeipy AI] No se pudo enviar la solicitud (${response.status} · ${failure.error}${failure.requestId ? ` · ref ${failure.requestId}` : ""}).`);
+    return failure;
+  } catch (error) {
+    console.error("[Jeipy AI] No se pudo contactar al servidor para enviar la solicitud.", error);
     return { ok: false, error: "failed" };
   }
 }

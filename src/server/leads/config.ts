@@ -7,6 +7,10 @@ import "server-only";
 const env = (name: string) => process.env[name]?.trim() || undefined;
 
 export const leadsConfig = {
+  supabase: {
+    url: env("SUPABASE_URL")?.replace(/\/$/, ""),
+    serviceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
+  },
   /** Destinatarios de la notificación. Admite varios separados por coma. */
   recipients: (env("JEIPY_LEADS_EMAIL") ?? "")
     .split(",")
@@ -17,11 +21,4 @@ export const leadsConfig = {
     /** Remitente verificado en Resend. `onboarding@resend.dev` solo entrega al correo de la cuenta de Resend. */
     from: env("LEADS_EMAIL_FROM") ?? "Jeipy AI <onboarding@resend.dev>",
   },
-  supabase: {
-    url: env("SUPABASE_URL")?.replace(/\/$/, ""),
-    serviceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
-    table: env("SUPABASE_LEADS_TABLE") ?? "leads",
-  },
-  /** "file": guarda en .data/leads.jsonl (solo para desarrollo local; en Vercel el disco no persiste). */
-  store: env("LEADS_STORE") ?? (process.env.NODE_ENV === "development" ? "file" : undefined),
 };

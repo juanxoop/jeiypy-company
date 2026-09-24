@@ -2,13 +2,15 @@
  * Contrato de un lead de Jeipy AI entre el asistente (cliente) y el backend.
  * El cliente envía una `LeadSubmission`; el servidor la valida y la convierte en `LeadRecord`.
  */
-import type { AiLevel, AiTierId, Feature, Goal, PlanId, WebsiteStatus } from "@/features/assistant/types";
+import type { AiLevel, AiTierId, DigitalChannel, Feature, Goal, PlanId, WebsiteStatus } from "@/features/assistant/types";
 
 /** Qué pidió el cliente al dejar sus datos. */
 export type LeadIntent = "quote" | "callback";
 
-/** Clasificación interna para el equipo. Nunca se muestra al cliente. */
-export type LeadStatus = "nuevo" | "interesado" | "cotizacion" | "solicita-llamada";
+/** Estado interno del lead para el equipo. Nunca se muestra al cliente. */
+export type LeadStatus = "nuevo" | "contactado" | "interesado" | "cotizacion" | "solicita-llamada" | "cerrado" | "no-interesado";
+
+export const LEAD_STATUSES: LeadStatus[] = ["nuevo", "contactado", "interesado", "cotizacion", "solicita-llamada", "cerrado", "no-interesado"];
 
 export type ContactChannel = "whatsapp" | "llamada" | "correo";
 
@@ -24,7 +26,10 @@ export type LeadSubmission = {
   email?: string;
   businessName?: string;
   businessType?: string;
-  website?: WebsiteStatus;
+  businessDescription?: string;
+  /** existingDigitalChannels: dónde tiene presencia hoy. */
+  channels: DigitalChannel[];
+  websiteStatus?: WebsiteStatus;
   goal?: Goal;
   features: Feature[];
   aiInterest: boolean;
@@ -55,7 +60,41 @@ export type LeadRecord = Omit<LeadSubmission, "consent"> & {
   userAgent?: string;
 };
 
-/** Respuesta de POST /api/leads. `ok` solo es true si el lead quedó guardado o notificado de verdad. */
+/** Respuesta de POST /api/leads. `ok` solo es true si la base de datos confirmó que el lead quedó guardado. */
 export type LeadSubmitResult =
-  | { ok: true; stored: boolean; notified: boolean }
-  | { ok: false; error: "invalid" | "rate-limited" | "not-configured" | "failed" };
+  | { ok: true; id: string; notified: boolean }
+  | { ok: false; error: "invalid" | "rate-limited" | "not-configured" | "failed"; requestId?: string };
+
+/** Lead tal como lo guarda la base de datos (lo que lee la bandeja /admin/leads). */
+export type LeadRow = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: LeadStatus;
+  intent: LeadIntent;
+  name: string;
+  phone: string;
+  email?: string;
+  businessName?: string;
+  businessType?: string;
+  businessDescription?: string;
+  channels: DigitalChannel[];
+  websiteStatus?: WebsiteStatus;
+  goal?: Goal;
+  needs: string[];
+  features: Feature[];
+  aiInterest: boolean;
+  aiLevel?: AiLevel;
+  recommendedPlan?: PlanId;
+  recommendedAi?: AiTierId;
+  budget?: number;
+  callbackRequested: boolean;
+  preferredTime?: string;
+  preferredChannel?: ContactChannel;
+  summary: string;
+  report: string;
+  transcript?: TranscriptEntry[];
+  consentAt: string;
+};
+
+export type LeadNote = { id: string; createdAt: string; author?: string; body: string };

@@ -1,5 +1,5 @@
 import "server-only";
-import type { AiLevel, AiTierId, Feature, Goal, PlanId, WebsiteStatus } from "@/features/assistant/types";
+import type { AiLevel, AiTierId, DigitalChannel, Feature, Goal, PlanId, WebsiteStatus } from "@/features/assistant/types";
 import type { ContactChannel, LeadIntent, LeadSubmission, TranscriptEntry } from "@/features/leads/types";
 
 /**
@@ -10,7 +10,8 @@ const PLANS: PlanId[] = ["basico", "esencial", "premium"];
 const AI_TIERS: AiTierId[] = ["lite", "pro", "custom"];
 const FEATURES: Feature[] = ["catalog", "booking", "forms", "ai", "integrations", "seo", "automation"];
 const GOALS: Goal[] = ["clients", "image", "showcase", "sell", "automate"];
-const WEBSITES: WebsiteStatus[] = ["yes", "no", "social"];
+const WEBSITES: WebsiteStatus[] = ["none", "existing", "outdated", "needs_improvement"];
+const CHANNELS_ALLOWED: DigitalChannel[] = ["whatsapp", "instagram", "facebook", "tiktok", "google_business", "website", "ecommerce", "other", "none"];
 const AI_LEVELS: AiLevel[] = ["basic", "advanced"];
 const INTENTS: LeadIntent[] = ["quote", "callback"];
 const CHANNELS: ContactChannel[] = ["whatsapp", "llamada", "correo"];
@@ -82,7 +83,9 @@ export function validateLead(input: unknown): ValidationResult {
       email,
       businessName: text(b.businessName, 120),
       businessType: text(b.businessType, 80),
-      website: oneOf(b.website, WEBSITES),
+      businessDescription: text(b.businessDescription, 300),
+      channels: Array.isArray(b.channels) ? ([...new Set(b.channels.filter((c) => oneOf(c, CHANNELS_ALLOWED)))] as DigitalChannel[]) : [],
+      websiteStatus: oneOf(b.websiteStatus, WEBSITES),
       goal: oneOf(b.goal, GOALS),
       features,
       aiInterest: b.aiInterest === true,

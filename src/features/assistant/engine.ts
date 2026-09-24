@@ -20,14 +20,17 @@ import {
   detectIntent,
   enrichProfile,
   extractBudget,
+  extractBusinessDescription,
+  applyPresence,
+  businessRef,
   extractBusinessType,
+  extractPresence,
   extractChannel,
   extractEmail,
   extractFeatures,
   extractGoal,
   extractName,
   extractPhone,
-  extractWebsite,
   isBookingBusiness,
   isKnownBusiness,
   isQuestion,
@@ -37,7 +40,7 @@ import {
   parseYesNo,
   type Intent,
 } from "./nlu";
-import { FEATURE_LABEL, GOAL_LABEL, WEBSITE_LABEL, needsLabels } from "@/features/leads/labels";
+import { CHANNEL_LABEL, FEATURE_LABEL, GOAL_LABEL, needsLabels, presenceLabel } from "@/features/leads/labels";
 import {
   coverage,
   nextLowerTier,
@@ -85,7 +88,12 @@ const slotKey = (slot: Slot) => (slot.kind === "feature" ? `feature:${slot.featu
 function businessKind(profile: Profile): "food" | "retail" | "service" {
   const t = normalize(profile.businessType ?? "");
   if (/restaurante|cafe|panaderia|pasteleria|comidas|cafeteria/.test(t)) return "food";
-  if (/tienda|boutique|ferreteria|joyeria|optica|drogueria|papeleria|floristeria/.test(t)) return "retail";
+  if (
+    /tienda|boutique|venta|ferreteria|joyeria|optica|drogueria|papeleria|floristeria|miscelanea|minimercado|supermercado|repuesto|calzado|ropa|accesorio|bisuteria|cosmetic|perfum|mueble|mascota|celular|tecnologia|licorera|carniceria|fruver/.test(t) ||
+    profile.goal === "sell" ||
+    profile.channels?.includes("ecommerce")
+  )
+    return "retail";
   return "service";
 }
 
@@ -124,7 +132,7 @@ function nextSlot(state: ConversationState): Slot | null {
 
   const diagnosis: (Slot | null)[] = [
     pending({ kind: "businessType" }, Boolean(profile.businessType)),
-    pending({ kind: "website" }, Boolean(profile.website)),
+    pending({ kind: "website" }, Boolean(profile.websiteStatus)),
     pending({ kind: "goal" }, Boolean(profile.goal)),
     pending({ kind: "feature", feature: "catalog" }, f.catalog !== undefined),
     isBookingBusiness(profile.businessType)
@@ -150,8 +158,12 @@ function question(slot: Slot, state: ConversationState): { blocks: MessageBlock[
       };
     case "website":
       return {
-        blocks: [text("¿Ya tienes página web o solo manejas redes y WhatsApp?")],
-        quickReplies: ["Ya tengo web", "Solo redes y WhatsApp", "Aún no tengo nada"],
+        blocks: [
+          text(
+            "¿Qué presencia digital tiene hoy tu negocio? Cuéntamelo con tus palabras: WhatsApp, Instagram, Facebook, TikTok, Google Maps, una página web…",
+          ),
+        ],
+        quickReplies: ["Solo WhatsApp", "Redes sociales, sin página", "Ya tengo página web", "No tengo nada"],
       };
     case "goal":
       return {
@@ -183,7 +195,7 @@ function question(slot: Slot, state: ConversationState): { blocks: MessageBlock[
       return { blocks: [text("¿Quieres dejar también un correo? Es opcional.")], quickReplies: ["Omitir"] };
     case "businessName":
       return {
-        blocks: [text(`¿Cómo se llama tu ${isKnownBusiness(profile.businessType) ? profile.businessType : "negocio"}?`)],
+        blocks: [text(`¿Cómo se llama ${businessRef(profile.businessType)}?`)],
         quickReplies: ["Aún no tiene nombre"],
       };
     case "channel":
@@ -267,15 +279,61 @@ const GOAL_ACK: Record<Goal, string> = {
   automate: "Automatizar la atención te libera tiempo para lo importante.",
 };
 
+/** "una ferretería", "un taller": femenino si la primera palabra termina en "a" (con pocas excepciones). */
 function articleFor(business: string): string {
-  return /^(barberia|peluqueria|tienda|clinica|veterinaria|academia|floristeria|joyeria|optica|drogueria|papeleria|lavanderia|constructora|agencia|cafeteria|panaderia|pasteleria|inmobiliaria|boutique|firma)/.test(
-    normalize(business).trim(),
-  )
-    ? "una"
-    : "un";
+  const first = normalize(business).trim().split(" ")[0];
+  if (/^(spa|dia|mapa|sistema|programa)$/.test(first)) return "un";
+  return /(a|ion|dad|boutique)$/.test(first) ? "una" : "un";
 }
 
 type Filled = { state: ConversationState; ack?: string };
+
+/** Acuse del rubro, sin forzar frases raras con rubros descriptivos ("venta de calzado"). */
+function businessAck(value: string): string {
+  if (/^(venta|servicios|negocio|organizaci|empresa|consultoria)/.test(normalize(value).trim())) return `Perfecto, un negocio de ${value.replace(/^negocio (de )?/, "")}.`;
+  if (isKnownBusiness(value)) return `Perfecto, ${articleFor(value)} ${value}.`;
+  return `Perfecto, anotado: ${value}.`;
+}
+
+const channelNames = (profile: Profile) =>
+  (profile.channels ?? []).filter((c) => c !== "website" && c !== "none").map((c) => CHANNEL_LABEL[c]);
+
+/** Acuse de la presencia digital: muestra que entendió dónde está hoy el negocio. */
+function presenceAck(profile: Profile): string {
+  const names = channelNames(profile);
+  switch (profile.websiteStatus) {
+    case "outdated":
+      return "Entendido: no partimos de cero. Se trata de renovar tu página para que vuelva a trabajar para ti.";
+    case "needs_improvement":
+      return "Entendido: ya tienes página, así que el foco es mejorarla para que te traiga más clientes.";
+    case "existing":
+      return `Bien: ya tienes página${names.length ? ` y usas ${joinNatural(names)}` : ""}, así que no partimos de cero; la idea es llevarla a una base más sólida.`;
+    default:
+      return names.length
+        ? `Perfecto: hoy trabajas con ${joinNatural(names)}, sin página propia. Una web te da un lugar propio, más confianza y clientes que te encuentran.`
+        : "Perfecto, empezarías desde cero, que es el mejor momento para hacerlo bien.";
+  }
+}
+
+/** Qué aprendió de un mensaje libre, para acusarlo en una frase. */
+function learnedAck(before: Profile, after: Profile): string | undefined {
+  const parts: string[] = [];
+  if (!before.businessType && after.businessType) parts.push(businessAck(after.businessType));
+  const presenceParts: string[] = [];
+  const presenceChanged =
+    before.websiteStatus !== after.websiteStatus || (before.channels ?? []).join() !== (after.channels ?? []).join();
+  if (presenceChanged && after.websiteStatus) {
+    presenceParts.push(
+      before.websiteStatus === "none" && after.websiteStatus !== "none"
+        ? `Anotado: también tienes página web. ${presenceAck(after)}`
+        : presenceAck(after),
+    );
+  }
+  // Una sola vez "Perfecto" por mensaje.
+  const presence = presenceParts.map((p) => (parts.length ? p.replace(/^Perfecto: h/, "H").replace(/^Perfecto, e/, "E") : p));
+  const all = [...parts, ...presence];
+  return all.length ? all.join(" ") : undefined;
+}
 
 function fillSlot(slot: Slot, input: string, state: ConversationState): Filled | null {
   const profile: Profile = { ...state.profile, features: { ...state.profile.features } };
@@ -286,19 +344,16 @@ function fillSlot(slot: Slot, input: string, state: ConversationState): Filled |
       const value = extractBusinessType(input, { loose: true });
       if (!value) return null;
       profile.businessType = value;
-      return next(isKnownBusiness(value) ? `Perfecto, ${articleFor(value)} ${value}.` : "Perfecto.");
+      profile.businessDescription ??= extractBusinessDescription(input);
+      return next(businessAck(value));
     }
     case "website": {
-      const value = extractWebsite(input, { direct: true });
-      if (!value) return null;
-      profile.website = value;
-      return next(
-        {
-          yes: "Bien, entonces podemos mejorarla o rehacerla sobre una base más sólida.",
-          no: "Perfecto, empezarías desde cero, que es el mejor momento para hacerlo bien.",
-          social: "Es lo más común. Una web propia te da más control y más confianza.",
-        }[value],
-      );
+      // Respuesta libre: "Solo manejo WhatsApp y un Instagram", "tengo página pero está vieja"…
+      const reading = extractPresence(input, { direct: true });
+      if (!reading.mentioned) return null;
+      applyPresence(profile, input, reading, { direct: true });
+      profile.websiteStatus ??= "none";
+      return next(presenceAck(profile));
     }
     case "goal": {
       const value = extractGoal(input);
@@ -422,7 +477,8 @@ function summaryRows(state: ConversationState) {
     .filter(Boolean)
     .join(" ");
   if (business) rows.push({ label: "Negocio", value: business });
-  if (profile.website) rows.push({ label: "Hoy", value: WEBSITE_LABEL[profile.website] });
+  const presence = presenceLabel(profile.channels, profile.websiteStatus);
+  if (presence) rows.push({ label: "Presencia", value: presence });
   if (profile.goal) rows.push({ label: "Objetivo", value: GOAL_LABEL[profile.goal] });
   const wanted = wantedFeatures(profile).filter((f) => f !== "ai");
   if (wanted.length) rows.push({ label: "Necesita", value: capitalize(wanted.map((f) => FEATURE_LABEL[f]).join(", ")) });
@@ -447,11 +503,7 @@ function summaryRows(state: ConversationState) {
 export function buildWhatsAppMessage(state: ConversationState): string {
   const { profile, recommended, recommendedAi } = state;
   const hello = profile.name ? `Hola, soy ${firstName(profile.name)}.` : "Hola.";
-  const business = profile.businessName
-    ? profile.businessName
-    : isKnownBusiness(profile.businessType)
-      ? `mi ${profile.businessType}`
-      : "mi negocio";
+  const business = profile.businessName ?? businessRef(profile.businessType, "mi");
   const parts = [`${hello} Estuve hablando con Jeipy AI sobre ${business}.`];
   if (recommended) {
     const plan = `${getPlan(recommended).name}${recommendedAi ? ` + ${getAiTier(recommendedAi).name}` : ""}`;
@@ -480,7 +532,9 @@ export function buildLeadDraft(state: ConversationState): LeadDraft {
     email: profile.email,
     businessName: profile.businessName,
     businessType: profile.businessType,
-    website: profile.website,
+    businessDescription: profile.businessDescription,
+    channels: profile.channels ?? [],
+    websiteStatus: profile.websiteStatus,
     goal: profile.goal,
     features: wantedFeatures(profile),
     aiInterest: Boolean(profile.features.ai),
@@ -538,9 +592,10 @@ export function leadSubmissionResult(state: ConversationState, ok: boolean): Ass
         ok: false,
         title: "No pudimos enviar tu solicitud",
         text: whatsapp
-          ? "Hubo un problema al registrar tus datos y no quiero hacerte creer que llegaron. Puedes intentarlo de nuevo o escribirnos directamente por WhatsApp."
-          : "Hubo un problema al registrar tus datos y no quiero hacerte creer que llegaron. Inténtalo de nuevo en unos minutos.",
+          ? "Puedes intentarlo nuevamente o continuar por WhatsApp."
+          : "Puedes intentarlo nuevamente en unos minutos. Tus datos no se perdieron en esta conversación.",
       },
+      ...(whatsapp ? [{ ...closingBlock(state, "Continuar por WhatsApp"), offerCallback: false } as MessageBlock] : []),
     ],
     quickReplies: ["Reintentar envío", "Tengo otra duda"],
     state: { ...state, flow: "free", expecting: null, pendingSubmission: true },
@@ -892,7 +947,8 @@ function upgradeLater(state: ConversationState, feature?: Feature): MessageBlock
 /** "No entendí": se explica más simple lo último, sin reiniciar. */
 const SLOT_EXPLANATION: Partial<Record<Slot["kind"] | `feature:${Feature}`, string>> = {
   businessType: "Solo necesito saber a qué se dedica tu negocio; por ejemplo, restaurante, barbería, tienda o consultorio.",
-  website: "Te pregunto si hoy ya tienes una página web propia o si solo usas redes sociales y WhatsApp.",
+  website:
+    "Te pregunto dónde está hoy tu negocio en internet: por ejemplo WhatsApp, Instagram, Facebook, TikTok, Google Maps o una página web. Puedes contármelo con tus palabras.",
   goal: "Te pregunto qué es lo más importante para ti: conseguir más clientes, verte más profesional, mostrar lo que vendes o automatizar la atención.",
   "feature:catalog": "Me refiero a una sección donde tus clientes vean tus productos o servicios con sus precios.",
   "feature:booking": "Me refiero a que tus clientes puedan apartar una cita o reserva desde la web, sin tener que escribirte.",
@@ -1225,6 +1281,17 @@ export function respond(input: string, current: ConversationState): Reply {
       };
     }
 
+    // Un dato nuevo o una corrección a mitad del diagnóstico ("también tengo página web"):
+    // se guarda y se sigue con la siguiente pregunta pendiente, sin reiniciar.
+    if (diagnosing && !isQuestion(input)) {
+      const learnedMid = enrichProfile(current.profile, input);
+      if (JSON.stringify(learnedMid) !== JSON.stringify(current.profile)) {
+        return advance({ ...current, profile: learnedMid, expecting: null, retries: 0 }, [
+          text(learnedAck(current.profile, learnedMid) ?? "Anotado, lo tengo en cuenta."),
+        ]);
+      }
+    }
+
     // "¿Cuál es mejor?" o "no sé" a mitad del diagnóstico: se explica para qué son las preguntas.
     if (intent && ["which-best", "unsure", "recommend"].includes(intent.type)) {
       const q = question(slot, current);
@@ -1378,9 +1445,7 @@ export function respond(input: string, current: ConversationState): Reply {
       return startFlow(
         "advisor",
         withProfile,
-        isKnownBusiness(enriched.businessType)
-          ? `Buenísimo, ${articleFor(enriched.businessType!)} ${enriched.businessType}. Para recomendarte bien, quiero entender cómo trabajas hoy.`
-          : "¡Buenísimo! Para recomendarte bien, quiero entender cómo trabajas hoy.",
+        `¡Buenísimo! ${learnedAck(current.profile, enriched) ?? ""} Para recomendarte bien, quiero entender cómo trabajas hoy.`.replace(/\s+/g, " "),
       );
   }
 
@@ -1392,15 +1457,23 @@ export function respond(input: string, current: ConversationState): Reply {
     if (answer) return answer;
   }
 
-  // 6. El visitante cuenta algo de su negocio.
+  // 6. El visitante cuenta algo de su negocio: se guarda, se acusa y se sigue sin repetir preguntas.
   if (learned) {
+    const ack = learnedAck(current.profile, enriched);
     if (current.recommended) {
-      const before = current.recommended;
-      const reply = recommend(withProfile, [text("Gracias por el dato, lo tengo en cuenta.")]);
-      if (reply.state.recommended !== before) reply.blocks.splice(1, 0, text("Con eso cambia mi recomendación."));
-      return reply;
+      const before = tierOf(current.recommended, current.recommendedAi);
+      const { tier } = recommendPlan(enriched, current.planCap);
+      // Un dato que no cambia el plan (p. ej. "también tengo página") se acusa sin repetir la tarjeta.
+      if (tier === before && ack) {
+        return {
+          blocks: [text(`${ack} Lo sumo a tu solicitud; la recomendación de ${tierLabel(tier)} se mantiene.`)],
+          quickReplies: ["Quiero avanzar", "Tengo otra duda"],
+          state: withProfile,
+        };
+      }
+      return continueWith(withProfile, [text(ack ?? "Gracias por el dato, lo tengo en cuenta.")]);
     }
-    return startFlow("advisor", withProfile, "Perfecto. Para recomendarte bien, quiero entender cómo trabajas hoy.");
+    return startFlow("advisor", withProfile, ack ? `${ack} Para recomendarte bien, sigamos.` : "Perfecto. Para recomendarte bien, quiero entender cómo trabajas hoy.");
   }
 
   // 7. Un "sí" o "no" suelto sin pregunta pendiente.

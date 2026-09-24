@@ -186,6 +186,13 @@ src/features/assistant/
 
 El nivel aceptado queda como tope (`planCap`) y las recomendaciones siguientes lo respetan. Nunca promete funciones que el nivel no incluye. Prefiere cerrar un Básico bien explicado antes que perder al cliente insistiendo en Premium.
 
+**Negocio y presencia digital:** acepta cualquier negocio.
+- **Rubro:** guarda `businessType`, con una etiqueta limpia si es un rubro frecuente ("venta de calzado") o la frase del cliente ("reparación de celulares").
+- **Descripción:** guarda `businessDescription` con sus palabras.
+- **Presencia:** la pregunta es abierta y guarda `channels` (existingDigitalChannels: whatsapp, instagram, facebook, tiktok, google_business, website, ecommerce, other, none) y `websiteStatus` (none, existing, outdated, needs_improvement).
+- **Inferencias:** "Solo manejo WhatsApp y un Instagram" se lee como WhatsApp + Instagram, sin página. "Tengo página pero está vieja" se lee como renovar, no empezar de cero. Querer una página ("quiero cotizar una página") no cuenta como tenerla.
+- **Contexto:** lo que ya dijo no se vuelve a preguntar, y las correcciones ("también tengo página web") actualizan el perfil sin reiniciar el diagnóstico.
+
 **Texto libre:** las sugerencias rápidas solo aceleran la conversación. Cualquier mensaje se interpreta con el contexto: presupuesto, negaciones ("no quiero…"), cambios de opinión ("ahora sí quiero reservas"), dudas y objeciones, también a mitad del diagnóstico, sin reiniciarlo ni repetir preguntas ya respondidas.
 
 **Cierre comercial:** tras la recomendación aparece "Tu recomendación está lista" y "¿Cómo quieres continuar?", con dos opciones del mismo peso:
@@ -195,9 +202,9 @@ El nivel aceptado queda como tope (`planCap`) y las recomendaciones siguientes l
 
 **Captación del lead:** "Quiero avanzar", "Dejar mis datos" o el final de una cotización piden nombre, teléfono, correo (opcional), nombre del negocio (si falta) y canal preferido. Antes de enviar muestra el resumen y pide autorización ("¿autorizas a Jeipy Company a contactarte…?"). Sin nombre, teléfono o autorización no se envía nada. Una segunda solicitud en la misma conversación (p. ej. llamada después de cotizar) actualiza el mismo lead.
 
-**Envío real:** el motor emite el efecto `submit-lead` y `useAssistant` lo envía a `POST /api/leads` junto con el historial. El servidor lo guarda (Supabase) y avisa al equipo (Resend). El motor muestra "Solicitud recibida" solo si el backend lo confirmó; si falla, lo dice y ofrece "Reintentar envío". No promete tiempos de respuesta.
+**Envío real:** el motor emite el efecto `submit-lead` y `useAssistant` lo envía a `POST /api/leads` junto con el historial mientras muestra "Enviando tu solicitud…". El servidor lo guarda en Supabase y solo responde éxito con la fila confirmada. Después avisa por correo (Resend, opcional). Si falla: "No pudimos enviar tu solicitud. Puedes intentarlo nuevamente o continuar por WhatsApp", y el error queda registrado con una referencia. El lead aparece en la bandeja privada `/admin/leads`. No promete tiempos de respuesta.
 
-**Prioridad interna** (no se muestra al cliente): Nuevo, Interesado (tiene recomendación), Cotización o Solicita llamada.
+**Estado interno** (no se muestra al cliente): Nuevo, Contactado, Interesado, Cotización, Solicita llamada, Cerrado o No interesado. El asistente asigna el inicial y el equipo lo gestiona desde la bandeja.
 
 ## 8. Próxima fase: integración real
 

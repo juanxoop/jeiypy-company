@@ -51,32 +51,40 @@ transparente y redimensiona), todos los derivados: `src/assets/brand/jp-isotipo.
 `src/app/apple-icon.png`, los iconos del manifest y la silueta `public/brand/jp-mask.png`
 del destello metálico. La imagen Open Graph también usa el isotipo.
 
-## Leads de Jeipy AI
+## Leads de Jeipy AI y bandeja del equipo
 
-Cuando un visitante pide cotización o una llamada, Jeipy AI pide nombre, teléfono, correo
-(opcional) y nombre del negocio, muestra el resumen y pide autorización. Después el navegador
-envía el lead a `POST /api/leads`, y el servidor:
+**Flujo:**
+1. El cliente completa su solicitud en Jeipy AI.
+2. `POST /api/leads` la guarda en **Supabase** (tabla `leads`).
+3. Aparece en la bandeja privada **`/admin/leads`**.
+4. Si el correo está configurado, se envía un aviso por **Resend**.
 
-1. valida y sanea los datos (`src/server/leads/validate.ts`);
-2. genera el resumen comercial y la prioridad interna: Nuevo, Interesado, Cotización o Solicita llamada (`src/features/leads/report.ts`);
-3. lo guarda en **Supabase** (`src/server/leads/store.ts`, tabla de `supabase/leads.sql`);
-4. avisa al equipo por correo con **Resend** (`src/server/leads/notify.ts` + `email.ts`).
+El asistente solo muestra "Solicitud recibida" cuando Supabase confirma que guardó el lead. Si el guardado falla, lo dice y ofrece reintentar, y el error queda en los registros del servidor con una referencia (`requestId`). La falta de correo nunca impide guardar el lead.
 
-El asistente solo dice "Solicitud recibida" si el lead quedó guardado o notificado. Si no, lo dice
-y ofrece reintentar. Las claves solo existen en el servidor.
+**Configuración (una vez):**
+1. En Supabase: *SQL Editor → New query*, pega `supabase/leads.sql` y ejecútalo. Crea o actualiza las tablas `leads` y `lead_notes` con RLS activo y sin políticas públicas.
+2. En Vercel: *Project → Settings → Environment Variables*, agrega las variables de la tabla y vuelve a desplegar.
 
-| Variable | Para qué |
-| --- | --- |
-| `JEIPY_LEADS_EMAIL` | Correo(s) del equipo que reciben los leads (separados por coma) |
-| `RESEND_API_KEY` | API key de Resend |
-| `LEADS_EMAIL_FROM` | Remitente verificado en Resend (opcional; por defecto `onboarding@resend.dev`) |
-| `SUPABASE_URL` | URL del proyecto de Supabase |
-| `SUPABASE_SERVICE_ROLE_KEY` | Clave `service_role` de Supabase (secreta) |
-| `SUPABASE_LEADS_TABLE` | Nombre de la tabla (opcional, por defecto `leads`) |
-| `LEADS_STORE=file` | Solo en local: guarda en `.data/leads.jsonl` (automático en `npm run dev`) |
+| Variable | Obligatoria | Para qué |
+| --- | --- | --- |
+| `SUPABASE_URL` | Sí | URL del proyecto (*Project Settings → API*) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Sí | Clave `service_role` (secreta, solo servidor) |
+| `ADMIN_PASSWORD` | Sí | Contraseña del equipo para `/admin/leads` (≥ 10 caracteres) |
+| `ADMIN_SESSION_SECRET` | Sí | Firma de las sesiones (≥ 32 caracteres: `openssl rand -base64 48`) |
+| `JEIPY_LEADS_EMAIL` | No | Correo(s) del equipo para el aviso (separados por coma) |
+| `RESEND_API_KEY` | No | API key de Resend para el aviso |
+| `LEADS_EMAIL_FROM` | No | Remitente verificado en Resend |
 
-`GET /api/leads` indica qué hay conectado (`storage`, `notifications`) sin mostrar ningún valor.
-Para cambiar de proveedor basta con implementar `LeadStore` o `LeadNotifier`.
+**Bandeja `/admin/leads`:**
+- Se entra con la contraseña del equipo. La sesión es una cookie httpOnly firmada que dura 12 horas.
+- `src/proxy.ts` bloquea `/admin` sin sesión, y cada página y acción vuelve a verificarla antes de tocar datos.
+- Muestra contadores por estado y un listado que se relee de la base de datos cada 20 s y al volver a la pestaña.
+- En el detalle de cada lead: llamar, abrir WhatsApp, cambiar estado, notas internas y marcar como contactado o cerrado.
+- Si la base de datos no está lista, la bandeja explica qué falta.
+
+**Seguridad:** el navegador nunca recibe claves. Los visitantes no pueden leer ni escribir las tablas: RLS está activo sin políticas y se revocaron los permisos de `anon` y `authenticated`. El formulario público solo crea leads validados en el servidor.
+
+Código: `src/server/leads/` (validación, Supabase, correo), `src/server/admin/` (sesión y acceso) y `src/app/admin/` (bandeja).
 
 ## Arquitectura
 
@@ -94,7 +102,8 @@ src/
     icons/        iconografía lineal propia
     visuals/      fondos y composiciones ilustradas
   features/       Jeipy AI (assistant/) y contrato y resumen de leads (leads/)
-  server/leads/   backend de leads: validación, almacenamiento, correo (solo servidor)
+  server/leads/   backend de leads: validación, Supabase, correo (solo servidor)
+  server/admin/   sesión y control de acceso de la bandeja /admin/leads
   lib/            utilidades (contacto/WhatsApp, hooks, tokens de movimiento)
   assets/brand/   isotipo oficial (fuente y versión optimizada)
 scripts/          generación de recursos de marca

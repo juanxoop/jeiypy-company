@@ -2,6 +2,7 @@
 
 import { AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { assistantConfig } from "@/config/assistant";
 import { cn } from "@/lib/cn";
@@ -16,6 +17,8 @@ const AssistantPanel = dynamic(loadPanel, { ssr: false });
  * Widget flotante de Jeipy AI: orbe con personalidad propia que abre el asistente.
  */
 export function AssistantLauncher() {
+  // La bandeja privada del equipo no muestra el asistente público.
+  const hidden = usePathname()?.startsWith("/admin") ?? false;
   const [open, setOpen] = useState(false);
   const [request, setRequest] = useState<{ id: number; message: string }>();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -51,6 +54,8 @@ export function AssistantLauncher() {
       if (fullscreen) document.documentElement.style.overflow = "";
     };
   }, [open, close]);
+
+  if (hidden) return null;
 
   return (
     <>

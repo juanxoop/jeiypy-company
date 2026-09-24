@@ -3,14 +3,11 @@ import { needsLabels } from "@/features/leads/labels";
 import { buildNarrative, buildReport, classifyLead } from "@/features/leads/report";
 import type { LeadRecord, LeadSubmission } from "@/features/leads/types";
 import { getLeadNotifier } from "./notify";
-import { getLeadStore } from "./store";
+import { isStoreConfigured, saveLead } from "./store";
 
-export type ProcessResult = {
-  /** Hay al menos un destino configurado (almacenamiento o notificación). */
-  configured: boolean;
-  stored: boolean;
-  notified: boolean;
-};
+export type ProcessResult =
+  | { ok: true; id: string; notified: boolean }
+  | { ok: false; reason: "not-configured" | "failed" };
 
 export function buildLeadRecord(lead: LeadSubmission, meta: { userAgent?: string } = {}): LeadRecord {
   const status = classifyLead(lead);
@@ -28,29 +25,38 @@ export function buildLeadRecord(lead: LeadSubmission, meta: { userAgent?: string
   };
 }
 
-/** Guarda el lead y avisa al equipo. Nunca informa éxito si ninguno de los dos ocurrió. */
-export async function processLead(lead: LeadSubmission, meta: { userAgent?: string } = {}): Promise<ProcessResult> {
-  const store = getLeadStore();
-  const notifier = getLeadNotifier();
-  if (!store && !notifier) {
-    console.warn("[leads] Sin destino configurado: define SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY y/o RESEND_API_KEY + JEIPY_LEADS_EMAIL.");
-    return { configured: false, stored: false, notified: false };
+/**
+ * Nuevo lead → base de datos → (bandeja) → correo.
+ * El éxito depende SOLO de que la base de datos confirme la escritura. El correo es un aviso
+ * adicional: si falla o no está configurado, el lead igual queda en la bandeja.
+ */
+export async function processLead(
+  lead: LeadSubmission,
+  meta: { userAgent?: string; requestId: string },
+): Promise<ProcessResult> {
+  if (!isStoreConfigured()) {
+    console.error(`[leads ${meta.requestId}] Base de datos no configurada: faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY.`);
+    return { ok: false, reason: "not-configured" };
   }
 
   const record = buildLeadRecord(lead, meta);
-  const [saved, sent] = await Promise.allSettled([store?.save(record), notifier?.notify(record)]);
+  let id: string;
+  try {
+    id = (await saveLead(record)).id;
+  } catch (error) {
+    console.error(`[leads ${meta.requestId}] Error guardando en Supabase:`, error);
+    return { ok: false, reason: "failed" };
+  }
 
-  if (store && saved.status === "rejected") console.error(`[leads] Error guardando en ${store.name}:`, saved.reason);
-  if (notifier && sent.status === "rejected") console.error(`[leads] Error notificando con ${notifier.name}:`, sent.reason);
-
-  return {
-    configured: true,
-    stored: Boolean(store) && saved.status === "fulfilled",
-    notified: Boolean(notifier) && sent.status === "fulfilled",
-  };
-}
-
-/** Qué hay conectado, sin exponer ningún valor secreto. */
-export function leadsStatus() {
-  return { storage: getLeadStore()?.name ?? null, notifications: getLeadNotifier()?.name ?? null };
+  let notified = false;
+  const notifier = getLeadNotifier();
+  if (notifier) {
+    try {
+      await notifier.notify(record, id);
+      notified = true;
+    } catch (error) {
+      console.error(`[leads ${meta.requestId}] Lead ${id} guardado, pero falló el correo (${notifier.name}):`, error);
+    }
+  }
+  return { ok: true, id, notified };
 }

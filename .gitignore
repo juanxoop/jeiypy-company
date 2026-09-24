@@ -11,5 +11,3 @@ next-env.d.ts
 npm-debug.log*
 .vercel
 
-# Leads guardados en local durante el desarrollo
-.data

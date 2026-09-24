@@ -9,15 +9,15 @@ import { renderLeadEmail } from "./email";
  */
 export interface LeadNotifier {
   readonly name: string;
-  notify(lead: LeadRecord): Promise<void>;
+  notify(lead: LeadRecord, id: string): Promise<void>;
 }
 
 /** Resend vía su API HTTP: https://resend.com/docs/api-reference/emails/send-email */
 function resendNotifier(apiKey: string, from: string, to: string[]): LeadNotifier {
   return {
     name: "resend",
-    async notify(lead) {
-      const email = renderLeadEmail(lead);
+    async notify(lead, id) {
+      const email = renderLeadEmail(lead, id);
       const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },

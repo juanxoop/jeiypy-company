@@ -32,7 +32,8 @@ import {
   type Tier,
 } from "./ladder";
 import { formatCop, getAiTier, getPlan } from "./knowledge";
-import { isKnownBusiness } from "./nlu";
+import { businessRef } from "./nlu";
+import { CHANNEL_LABEL } from "@/features/leads/labels";
 import type { AiTierId, MessageBlock, Profile } from "./types";
 
 export type { Tier } from "./ladder";
@@ -98,8 +99,13 @@ export function pickTier(profile: Profile, cap?: Tier): Tier {
 function becauseList(profile: Profile, tier: Tier): string[] {
   const f = profile.features;
   const context: string[] = [];
-  if (profile.website === "social") context.push("Hoy trabajas con redes y WhatsApp, sin una web propia.");
-  if (profile.website === "no") context.push("Aún no tienes página web.");
+  const channels = (profile.channels ?? []).filter((c) => c !== "website" && c !== "none").map((c) => CHANNEL_LABEL[c]);
+  if (profile.websiteStatus === "none") {
+    context.push(channels.length ? `Hoy trabajas con ${joinNatural(channels)}, sin una web propia.` : "Aún no tienes presencia digital.");
+  }
+  if (profile.websiteStatus === "outdated") context.push("Ya tienes página, pero está desactualizada: no partimos de cero, la renovamos.");
+  if (profile.websiteStatus === "needs_improvement") context.push("Ya tienes página, pero necesita mejoras para traerte clientes.");
+  if (profile.websiteStatus === "existing") context.push("Ya tienes página: la llevamos a una base más sólida.");
   if (profile.goal === "image") context.push("Buscas verte más profesional.");
 
   const commercial: string[] = [];
@@ -166,7 +172,7 @@ export function recommendPlan(profile: Profile, cap?: Tier): Recommendation {
   }
   const planId = tierPlan(tier);
   const downgraded = tierRank(tier) < tierRank(ideal);
-  const business = isKnownBusiness(profile.businessType) ? `tu ${profile.businessType}` : "tu negocio";
+  const business = businessRef(profile.businessType);
   const pNeeds = premiumNeeds(profile);
   const eNeeds = esencialNeeds(profile);
 

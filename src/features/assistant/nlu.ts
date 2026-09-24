@@ -3,7 +3,7 @@
  * y extrae datos del perfil a partir de lenguaje libre en español.
  */
 import type { UnknownTopic } from "./knowledge";
-import type { AiLevel, AiTierId, Budget, Feature, FeatureMap, Goal, PlanId, Profile, WebsiteStatus } from "./types";
+import type { AiLevel, AiTierId, Budget, DigitalChannel, Feature, FeatureMap, Goal, PlanId, Profile, WebsiteStatus } from "./types";
 
 export function normalize(text: string): string {
   return ` ${text
@@ -208,7 +208,10 @@ export function detectIntent(raw: string): Intent | null {
   if (has(t, " tiempo", " tarda", " demora", " plazo", " cuando estaria", " dias", " semanas")) return { type: "unknown-topic", topic: "timeline" };
   if (has(t, " forma de pago", " formas de pago", " pagar", " pago ", " cuotas", " anticipo", " tarjeta")) return { type: "unknown-topic", topic: "payment" };
   if (has(t, " dominio", " hosting", " hospedaje", " servidor")) return { type: "unknown-topic", topic: "hosting" };
-  if (has(t, " tienda online", " tiendas online", " tienda virtual", " tiendas virtuales", " ecommerce", " e-commerce", " carrito", " pagos en linea", " pagos online", " con pagos", " pasarela"))
+  if (
+    has(t, " tienda online", " tiendas online", " tienda virtual", " tiendas virtuales", " ecommerce", " e-commerce", " carrito", " pagos en linea", " pagos online", " con pagos", " pasarela") &&
+    !has(t, " tengo una tienda online", " tengo tienda online", " tengo una tienda virtual", " vendo por", " ya tengo")
+  )
     return { type: "unknown-topic", topic: "ecommerce" };
 
   if (has(t, " precio", " cuesta", " cuanto vale", " costo", " tarifa", " valor", " planes")) return { type: "prices" };
@@ -226,47 +229,99 @@ export function detectIntent(raw: string): Intent | null {
    --------------------------------------------------------------- */
 
 /** Rubros frecuentes → etiqueta legible. Las claves ya están normalizadas. */
+/**
+ * Rubros frecuentes con una etiqueta legible. Es solo una ayuda: cualquier otro negocio
+ * se entiende igual a partir de lo que el visitante escriba (ver `extractBusinessType`).
+ * Los más específicos van primero ("tienda de ropa" antes que "tienda").
+ */
 const BUSINESS_TYPES: [string, string][] = [
+  ["zapat", "venta de calzado"],
+  ["calzado", "venta de calzado"],
+  ["ropa", "tienda de ropa"],
+  ["boutique", "boutique"],
+  ["lenceria", "tienda de lencería"],
+  ["repuesto", "venta de repuestos"],
+  ["autoparte", "venta de repuestos"],
+  ["taller mecanic", "taller mecánico"],
+  ["mecanica", "taller mecánico"],
+  ["taller", "taller"],
+  ["lavadero", "lavadero de carros"],
+  ["ferreteria", "ferretería"],
+  ["drogueria", "droguería"],
+  ["farmacia", "droguería"],
+  ["miscelanea", "miscelánea"],
+  ["minimercado", "minimercado"],
+  ["supermercado", "supermercado"],
+  ["licorera", "licorera"],
+  ["carniceria", "carnicería"],
+  ["fruver", "fruver"],
+  ["accesorio", "venta de accesorios"],
+  ["bisuteria", "venta de bisutería"],
+  ["joyeria", "joyería"],
+  ["cosmetic", "venta de cosméticos"],
+  ["maquillaje", "venta de cosméticos"],
+  ["perfum", "perfumería"],
+  ["celular", "venta de celulares"],
+  ["computador", "venta de tecnología"],
+  ["tecnologia", "venta de tecnología"],
+  ["mueble", "venta de muebles"],
+  ["mascota", "tienda de mascotas"],
+  ["pet shop", "tienda de mascotas"],
   ["barberia", "barbería"],
   ["peluqueria", "peluquería"],
   ["salon de belleza", "salón de belleza"],
   ["spa", "spa"],
   ["manicure", "salón de uñas"],
+  ["unas", "salón de uñas"],
+  ["estetica", "centro de estética"],
+  ["tatuaje", "estudio de tatuajes"],
+  ["gimnasio", "gimnasio"],
+  ["gym", "gimnasio"],
+  ["crossfit", "gimnasio"],
+  ["yoga", "estudio de yoga"],
   ["restaurante", "restaurante"],
+  ["pizzeria", "pizzería"],
+  ["heladeria", "heladería"],
   ["cafeteria", "cafetería"],
   ["cafe ", "café"],
   ["panaderia", "panadería"],
   ["pasteleria", "pastelería"],
+  ["reposteria", "repostería"],
   ["comidas rapidas", "negocio de comidas rápidas"],
-  ["tienda de ropa", "tienda de ropa"],
-  ["boutique", "boutique"],
-  ["tienda", "tienda"],
-  ["ferreteria", "ferretería"],
-  ["taller", "taller"],
-  ["consultorio", "consultorio"],
+  ["catering", "catering"],
+  ["bar ", "bar"],
   ["odontolog", "consultorio odontológico"],
+  ["psicolog", "consultorio de psicología"],
+  ["fisioterap", "consultorio de fisioterapia"],
+  ["nutricion", "consultorio de nutrición"],
+  ["consultorio", "consultorio"],
   ["clinica", "clínica"],
   ["veterinaria", "veterinaria"],
-  ["gimnasio", "gimnasio"],
-  ["gym", "gimnasio"],
   ["fotograf", "estudio de fotografía"],
   ["abogad", "firma de abogados"],
   ["contador", "servicios contables"],
   ["contable", "servicios contables"],
+  ["consultoria", "consultoría"],
+  ["servicios profesionales", "servicios profesionales"],
+  ["arquitect", "estudio de arquitectura"],
   ["inmobiliaria", "inmobiliaria"],
+  ["finca raiz", "inmobiliaria"],
+  ["constructora", "constructora"],
   ["hotel", "hotel"],
   ["hostal", "hostal"],
+  ["agencia de viajes", "agencia de viajes"],
+  ["turismo", "agencia de turismo"],
+  ["eventos", "organización de eventos"],
   ["academia", "academia"],
+  ["colegio", "colegio"],
+  ["jardin infantil", "jardín infantil"],
   ["floristeria", "floristería"],
-  ["joyeria", "joyería"],
   ["optica", "óptica"],
-  ["drogueria", "droguería"],
   ["papeleria", "papelería"],
   ["lavanderia", "lavandería"],
-  ["constructora", "constructora"],
   ["agencia", "agencia"],
-  ["estetica", "centro de estética"],
-  ["tatuaje", "estudio de tatuajes"],
+  ["transporte", "empresa de transporte"],
+  ["tienda", "tienda"],
 ];
 
 /** Negocios donde reservar o agendar suele ser clave. */
@@ -275,9 +330,18 @@ const BOOKING_BUSINESSES = [
   "gimnasio", "estetica", "tatuaje", "hotel", "hostal", "fotograf", "restaurante",
 ];
 
-/** El rubro es uno de los conocidos (permite frases como "tu barbería"). */
+/** Rubro de la lista de frecuentes (permite frases como "tu ferretería"). */
 export function isKnownBusiness(businessType?: string): boolean {
   return Boolean(businessType && BUSINESS_TYPES.some(([, label]) => label === businessType));
+}
+
+const GENERIC_BUSINESS = /^(venta|servicios|negocio|organizaci|empresa|consultoria|reparaci|servicio)/;
+
+/** "tu ferretería" o, si el rubro es descriptivo ("venta de calzado"), "tu negocio". */
+export function businessRef(businessType?: string, possessive = "tu"): string {
+  return businessType && isKnownBusiness(businessType) && !GENERIC_BUSINESS.test(normalize(businessType).trim())
+    ? `${possessive} ${businessType}`
+    : `${possessive} negocio`;
 }
 
 export function isBookingBusiness(businessType?: string): boolean {
@@ -286,39 +350,153 @@ export function isBookingBusiness(businessType?: string): boolean {
   return BOOKING_BUSINESSES.some((b) => t.includes(b));
 }
 
+const BUSINESS_STOP = / (y|por|en|con|desde|pero|para|que|a trav[eé]s|mediante|aunque|solo|tambi[eé]n|adem[aá]s)( |$)|[,.;!?]/;
+
+/** Texto en minúsculas conservando tildes, para devolver el rubro tal como lo escribió el visitante. */
+const lowerKeep = (raw: string) => ` ${raw.toLowerCase().replace(/[¿¡!;:()"'$]/g, " ").replace(/\s+/g, " ").trim()} `;
+
+/** Frase del negocio tras un verbo ("vendo velas aromáticas por Instagram" → "venta de velas aromáticas"). */
+function businessPhrase(raw: string): string | undefined {
+  const t = lowerKeep(raw);
+  const service = t.match(/ ((?:reparaci[oó]n|arreglo|mantenimiento|instalaci[oó]n|servicio t[eé]cnico|alquiler|asesor[ií]a) de .{3,40})/);
+  if (service) return service[1].split(BUSINESS_STOP)[0].trim();
+  const match = t.match(
+    / (?:tengo|manejo|administro|mont[eé]|abr[ií]|somos|es) (?:un |una |el |la )(.{3,60})| (?:vendo|vendemos|venta de|ofrezco|ofrecemos|fabrico|fabricamos|hago|hacemos|distribuyo|distribuimos|produzco|comercializo|me dedico a|nos dedicamos a|mi negocio es|trabajo con|trabajamos con) (.{3,60})/,
+  );
+  if (!match) return undefined;
+  const verbSell = !match[1];
+  let phrase = (match[1] ?? match[2]).split(BUSINESS_STOP)[0].trim();
+  phrase = phrase.replace(/^(un|una|el|la|los|las|de) /, "").trim();
+  if (!phrase || phrase.split(" ").length > 5) return undefined;
+  const plain = normalize(phrase).trim();
+  // "Tengo una página web", "tengo un Instagram": es presencia digital, no el rubro.
+  if (/^(negocio|empresa|emprendimiento|pagina|web|pagina web|sitio|tienda online|marca|cuenta|perfil|idea|duda|pregunta)\b/.test(plain)) return undefined;
+  if (extractPresence(phrase).mentioned) return undefined;
+  const venta = /(vendo|vendemos|venta de|distribuyo|distribuimos|comercializo|fabrico|fabricamos|produzco)/.test(match[0]);
+  return verbSell && venta && !/^venta/.test(phrase) ? `venta de ${phrase}` : phrase;
+}
+
+/**
+ * Rubro del negocio. Acepta cualquier negocio: primero busca rubros frecuentes para darles
+ * una etiqueta limpia; si no, toma la frase que usó el visitante ("vendo accesorios para motos").
+ */
 export function extractBusinessType(raw: string, { loose = false } = {}): string | undefined {
   const t = normalize(raw);
+  // Un servicio ("reparación de celulares") no es la venta de ese producto.
+  const service = /(reparacion|arreglo|mantenimiento|instalacion|servicio tecnico|alquiler|asesoria) de/.test(t) ? businessPhrase(raw) : undefined;
+  if (service) return service;
   const known = BUSINESS_TYPES.find(([key]) => t.includes(` ${key}`));
   if (known) return known[1];
 
-  const match = t.match(/ (?:tengo|manejo|administro) (?:un|una) ([a-z ]{3,40}?)(?: y | que | con | en | para |$| )/);
-  if (match && !/(negocio|empresa|emprendimiento|pagina|web)$/.test(match[1].trim())) return match[1].trim();
+  const phrase = businessPhrase(raw);
+  if (phrase) return phrase;
 
   // Respuesta directa a "¿qué tipo de negocio tienes?": solo si no es una pregunta ni otra respuesta.
   const looksLikeOtherAnswer =
-    /^ (quiero|verme|conseguir|mostrar|automatizar|vender|tener|mas|solo) /.test(t) ||
+    /^ (quiero|verme|conseguir|mostrar|automatizar|vender|tener|mas|solo|no|si|ya) /.test(t) ||
     CONVERSATIONAL_INTENTS.has(detectIntent(raw)?.type ?? "");
-  if (loose && !isQuestion(raw) && !parseYesNo(raw) && !extractWebsite(raw) && !looksLikeOtherAnswer) {
-    const answer = t.trim().replace(/^(es |soy |tengo )?(un |una |el |la )?/, "");
-    if (answer.length >= 3 && answer.split(" ").length <= 5) return answer;
+  if (loose && !isQuestion(raw) && !parseYesNo(raw) && !extractPresence(raw).mentioned && !looksLikeOtherAnswer) {
+    const answer = lowerKeep(raw).trim().replace(/^(es |soy |tengo |somos )?(un |una |el |la )?/, "").split(BUSINESS_STOP)[0].trim();
+    if (answer.length >= 3 && answer.split(" ").length <= 6) return answer;
   }
   return undefined;
 }
 
-export function extractWebsite(raw: string, { direct = false } = {}): WebsiteStatus | undefined {
+/** Lo que el visitante cuenta de su negocio, con sus palabras (para el equipo, no se reinterpreta). */
+export function extractBusinessDescription(raw: string): string | undefined {
   const t = normalize(raw);
-  if (has(t, " solo redes", " solo instagram", " solo facebook", " solo whatsapp", " solo tengo instagram", " solo tengo facebook", " redes sociales", " redes y whatsapp", " manejo redes"))
-    return "social";
-  if (has(t, " no tengo pagina", " no tengo web", " no tengo sitio", " sin pagina", " sin web", " todavia no tengo", " aun no tengo", " no tengo nada"))
-    return "no";
-  if (has(t, " ya tengo pagina", " ya tengo web", " ya tengo una pagina", " ya tengo un sitio", " tengo pagina", " tengo una pagina web", " tengo web"))
-    return "yes";
-  if (direct) {
-    if (/^ (si|claro|ya|sip|correcto)\b/.test(t)) return "yes";
-    if (/^ (no|nop|todavia no|aun no|nada)\b/.test(t)) return "no";
-  }
-  return undefined;
+  const describesActivity = has(t, " vendo", " vendemos", " ofrezco", " ofrecemos", " me dedico", " nos dedicamos", " fabrico", " hacemos", " hago ", " trabajo con", " distribuimos", " distribuyo");
+  if (!describesActivity && !extractBusinessType(raw)) return undefined;
+  const clean = raw.replace(/\s+/g, " ").trim();
+  return clean.length >= 12 ? clean.slice(0, 280) : undefined;
 }
+
+/* ---------------------------------------------------------------
+   Presencia digital
+   --------------------------------------------------------------- */
+
+const CHANNEL_WORDS: [Exclude<DigitalChannel, "website" | "none">, string[]][] = [
+  ["whatsapp", [" whatsapp", " whats", " wasap", " guasap", " wpp", " wsp"]],
+  ["instagram", [" instagram", " insta ", " ig "]],
+  ["facebook", [" facebook", " face ", " fb ", " marketplace"]],
+  ["tiktok", [" tiktok", " tik tok"]],
+  ["google_business", [" google maps", " perfil de google", " ficha de google", " google business", " google my business", " google mi negocio", " en maps"]],
+  ["ecommerce", [" tienda online", " tienda virtual", " shopify", " mercado libre", " mercadolibre", " woocommerce", " rappi", " amazon", " falabella"]],
+  ["other", [" linkedin", " youtube", " pinterest", " twitter", " telegram", " redes", " red social"]],
+];
+const WEBSITE_WORDS = [" pagina web", " pagina", " sitio web", " sitio", " web ", " website", " dominio", " landing"];
+const OUTDATED = [" vieja", " viejo", " desactualizad", " antigua", " anticuad", " obsolet", " fea", " feo", " de hace anos", " pasada de moda", " vencid"];
+const NEEDS_WORK = [" mejorar", " mejorarla", " no funciona", " lenta", " no me gusta", " no vende", " no convierte", " rediseñ", " redisen", " arreglar", " no sirve", " mala", " renovar", " actualizar", " incompleta", " no genera"];
+
+/**
+ * Suma lo que el visitante contó de su presencia digital al perfil. Lo que dice de su página
+ * manda (corrige "no tengo" → "también tengo página"); la ausencia deducida solo se usa
+ * si aún no se sabía nada.
+ */
+export function applyPresence(profile: Profile, raw: string, reading: PresenceReading, { direct = false } = {}): void {
+  if (!reading.mentioned) return;
+  const merged = new Set([...(profile.channels ?? []), ...reading.channels]);
+  if ([...merged].some((c) => c !== "none")) merged.delete("none");
+  profile.channels = [...merged];
+  const explicitSite = direct || WEBSITE_WORDS.some((w) => normalize(raw).includes(w)) || reading.channels.includes("none");
+  if (reading.websiteStatus && (explicitSite || !profile.websiteStatus)) profile.websiteStatus = reading.websiteStatus;
+}
+
+export type PresenceReading = {
+  channels: DigitalChannel[];
+  websiteStatus?: WebsiteStatus;
+  /** El mensaje habla de su presencia digital (redes, página o "no tengo nada"). */
+  mentioned: boolean;
+};
+
+/**
+ * Presencia digital en texto libre: "Solo manejo WhatsApp y un Instagram" → whatsapp + instagram,
+ * sin página. `direct`: responde a la pregunta de presencia, así que "sí"/"no" también cuentan.
+ */
+export function extractPresence(raw: string, { direct = false } = {}): PresenceReading {
+  // "página de Facebook" es Facebook, no una página web.
+  const t = normalize(raw).replace(/ (pagina|perfil|cuenta) (de|en) (facebook|instagram|tiktok|google)/g, " $3");
+  const channels = new Set<DigitalChannel>();
+  for (const [channel, words] of CHANNEL_WORDS) {
+    for (const word of words) {
+      const i = t.indexOf(word);
+      if (i !== -1 && !negatedAt(t, i)) channels.add(channel);
+    }
+  }
+  // "redes" solo cuenta como "other" si no nombró ninguna red concreta.
+  if (channels.has("other") && [...channels].some((c) => c !== "other" && c !== "ecommerce") && !has(t, " linkedin", " youtube", " pinterest", " twitter", " telegram")) {
+    channels.delete("other");
+  }
+
+  let websiteStatus: WebsiteStatus | undefined;
+  const siteIndex = WEBSITE_WORDS.map((w) => t.indexOf(w)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
+  if (siteIndex !== undefined) {
+    const owns =
+      direct ||
+      has(t, " tengo", " tenemos", " mi pagina", " mi web", " mi sitio", " nuestra pagina", " nuestra web", " nuestro sitio", " cuento con", " manejo", " ya hay", " la pagina que", " la web que") ||
+      has(t, ...OUTDATED, ...NEEDS_WORK);
+    if (negatedAt(t, siteIndex)) websiteStatus = "none";
+    // "Quiero cotizar una página" es lo que busca, no lo que ya tiene.
+    else if (owns) {
+      channels.add("website");
+      websiteStatus = has(t, ...OUTDATED) ? "outdated" : has(t, ...NEEDS_WORK) ? "needs_improvement" : "existing";
+    }
+  }
+  if (has(t, " no tengo nada", " nada todavia", " todavia nada", " aun nada", " no tengo ninguna", " ninguna red", " sin redes", " no tengo redes") || /^ (nada|ninguna|ninguno) /.test(t)) {
+    if (!channels.size) channels.add("none");
+    websiteStatus ??= "none";
+  }
+  if (direct && !channels.size && !websiteStatus) {
+    if (/^ (si|claro|ya|sip|correcto)\b/.test(t)) {
+      channels.add("website");
+      websiteStatus = "existing";
+    } else if (/^ (no|nop|todavia no|aun no)\b/.test(t)) websiteStatus = "none";
+  }
+  // Nombró sus canales sin mencionar una página: hoy no tiene web propia.
+  if (!websiteStatus && [...channels].some((c) => c !== "none")) websiteStatus = "none";
+  return { channels: [...channels], websiteStatus, mentioned: channels.size > 0 || websiteStatus !== undefined };
+}
+
 
 export function extractGoal(raw: string): Goal | undefined {
   const t = normalize(raw);
@@ -340,7 +518,7 @@ const FEATURE_KEYWORDS: Record<Feature, string[]> = {
     " automatizar procesos", " automatice", " gestione", " embudo",
   ],
   integrations: [" integracion con", " integrar", " crm", " sistema de inventario", " software"],
-  seo: [" google", " seo", " aparecer en", " posicionamiento", " buscadores"],
+  seo: [" en google", " aparecer en", " salir en google", " seo", " posicionamiento", " buscadores"],
 };
 
 /** Funciones que el visitante menciona espontáneamente (solo afirmaciones). */
@@ -446,7 +624,8 @@ export function parseAiLevelAnswer(raw: string): AiLevel | undefined {
 export function enrichProfile(profile: Profile, raw: string): Profile {
   const next: Profile = { ...profile, features: { ...profile.features } };
   next.businessType ??= extractBusinessType(raw);
-  next.website ??= extractWebsite(raw);
+  next.businessDescription ??= extractBusinessDescription(raw);
+  applyPresence(next, raw, extractPresence(raw));
   next.goal ??= extractGoal(raw);
   const t = normalize(raw);
   const explicit = has(t, ...EXPLICIT_WANT);
