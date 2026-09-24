@@ -14,23 +14,38 @@
  *
  * Mencionar "IA" no lleva a Premium: decide el nivel de automatización. Busca la solución
  * adecuada, no la más cara, y explica: plan · por qué · qué cubre · qué cambiaría la elección.
+ *
+ * Presupuesto: si el visitante dio una cifra, se recomienda el nivel más alto que entra en ella
+ * (ver `ladder.ts`) y se explica con honestidad qué queda para una segunda etapa.
  */
-import { formatCop, getAiTier, getPlan, planPriceValue } from "./knowledge";
+import {
+  affordableTier,
+  aiSetupCost,
+  budgetAmount,
+  coverage,
+  minTier,
+  plural,
+  tierCost,
+  tierLabel,
+  tierPlan,
+  tierRank,
+  type Tier,
+} from "./ladder";
+import { formatCop, getAiTier, getPlan } from "./knowledge";
 import { isKnownBusiness } from "./nlu";
-import type { AiTierId, MessageBlock, PlanId, Profile } from "./types";
+import type { AiTierId, MessageBlock, Profile } from "./types";
+
+export type { Tier } from "./ladder";
 
 type Recommendation = Extract<MessageBlock, { type: "recommendation" }> & {
   /** Frase principal que resume la recomendación. */
   verdict: string;
   /** El caso necesita revisión humana (p. ej. presupuesto por debajo del plan de entrada). */
   needsHuman: boolean;
+  /** Nivel recomendado y nivel ideal sin límites de presupuesto (si difieren, hubo ajuste). */
+  tier: Tier;
+  ideal: Tier;
 };
-
-export type Tier = "basico" | "esencial" | "esencial-ai" | "premium";
-
-const ORDER: PlanId[] = ["basico", "esencial", "premium"];
-const rank = (id: PlanId) => ORDER.indexOf(id);
-const tierPlan = (tier: Tier): PlanId => (tier === "esencial-ai" ? "esencial" : tier);
 
 const joinNatural = (items: string[]) =>
   items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
@@ -62,8 +77,8 @@ export function needsAiLevelQuestion(profile: Profile): boolean {
   return Boolean(profile.features.ai) && !profile.aiLevel && premiumNeeds(profile).length === 0;
 }
 
-/** Nivel recomendado, opcionalmente limitado a un plan máximo (objeción de precio). */
-export function pickTier(profile: Profile, cap?: PlanId): Tier {
+/** Nivel ideal según las necesidades, opcionalmente limitado a un nivel máximo (objeción aceptada). */
+export function pickTier(profile: Profile, cap?: Tier): Tier {
   const wantsAi = Boolean(profile.features.ai);
   let tier: Tier;
   if (premiumNeeds(profile).length > 0) tier = "premium";
@@ -71,9 +86,8 @@ export function pickTier(profile: Profile, cap?: PlanId): Tier {
   else if (esencialNeeds(profile).length > 0) tier = "esencial";
   else tier = "basico";
 
-  if (cap && rank(tierPlan(tier)) > rank(cap)) {
-    tier = cap === "esencial" ? (wantsAi ? "esencial-ai" : "esencial") : cap;
-  }
+  if (cap) tier = minTier(tier, cap);
+  if (tier === "esencial-ai" && !wantsAi) tier = "esencial";
   return tier;
 }
 
@@ -137,70 +151,89 @@ export function aiCostNote(id: AiTierId): string {
   return `${tier.name} va aparte del plan web: configuración inicial desde ${tier.setup.price} ${tier.setup.currency} (pago único) + operación mensual según nivel de uso. ${tier.maintenance.value}.`;
 }
 
-export function recommendPlan(profile: Profile, cap?: PlanId): Recommendation {
-  const tier = pickTier(profile, cap);
+export function recommendPlan(profile: Profile, cap?: Tier): Recommendation {
+  const ideal = pickTier(profile);
+  const budget = budgetAmount(profile);
+  let tier = pickTier(profile, cap);
+  let budgetGap = false;
+  if (budget !== undefined) {
+    const fit = affordableTier(profile, budget, tier);
+    if (fit) tier = fit;
+    else {
+      budgetGap = true;
+      tier = "basico";
+    }
+  }
   const planId = tierPlan(tier);
+  const downgraded = tierRank(tier) < tierRank(ideal);
   const business = isKnownBusiness(profile.businessType) ? `tu ${profile.businessType}` : "tu negocio";
   const pNeeds = premiumNeeds(profile);
   const eNeeds = esencialNeeds(profile);
-  const aiTier = pickAiTier(profile, tier);
+
+  // La IA de Premium se suma aparte: si el presupuesto no la cubre, queda para una segunda etapa.
+  let aiTier = pickAiTier(profile, tier);
+  let deferredAi: AiTierId | undefined;
+  if (aiTier && tier === "premium" && budget !== undefined && budget < tierCost("premium") + aiSetupCost(aiTier)) {
+    deferredAi = aiTier;
+    aiTier = undefined;
+  }
   const aiName = aiTier ? getAiTier(aiTier).name : "";
+  const notes: string[] = [];
   let verdict: string;
   let alternative: string;
 
-  switch (tier) {
-    case "premium":
-      verdict =
-        profile.features.ai && profile.aiLevel === "advanced"
-          ? `Aquí ya necesitas automatización más profunda, no solo atención básica. **Premium** con **${aiName}** tiene más sentido porque permite ${joinNatural(
-              [profile.features.booking && "integrar reservas", "flujos personalizados", aiTier === "custom" ? "automatización diseñada para tu operación" : "un asistente comercial más completo"].filter(Boolean) as string[],
-            )}.`
-          : `Te recomiendo **Premium** porque necesitas ${joinNatural(pNeeds)}, algo que requiere desarrollo y flujos personalizados.${
-              aiTier ? ` Para la parte de IA, **${aiName}** es el complemento indicado.` : ""
-            }`;
-      alternative = aiTier
-        ? "Si por ahora te basta con que la IA responda dudas y capte datos, sin reservas ni procesos automatizados, Esencial + Jeipy AI Lite sería suficiente con una inversión menor."
-        : "Si más adelante quieres que un asistente atienda y clasifique a tus clientes, Premium es compatible con Jeipy AI Pro. Y si no necesitas reservas ni integraciones, Esencial sería suficiente.";
-      break;
-    case "esencial-ai":
-      verdict = `Por lo que me cuentas, **Esencial** cubre bien la parte de ${joinNatural(
-        eNeeds.length ? eNeeds : ["presencia digital"],
-      )}. Como también quieres automatizar preguntas frecuentes, **Jeipy AI Lite** puede añadirse como complemento sin necesidad de pasar todavía a Premium.`;
-      alternative =
-        cap === "esencial"
-          ? "Lo que quedaría para más adelante son las reservas, integraciones y automatizaciones avanzadas de Premium."
-          : "Si más adelante quieres que la IA gestione reservas, cotizaciones o clasifique clientes, ahí sí tendría sentido Premium con Jeipy AI Pro.";
-      break;
-    case "esencial":
-      verdict = `Te recomiendo **Esencial** porque necesitas ${joinNatural(eNeeds.length ? eNeeds : ["una presencia más completa"])}.`;
-      alternative =
-        cap === "esencial"
-          ? "Lo que quedaría para más adelante son las reservas, integraciones y automatizaciones de Premium."
-          : "Si además quieres automatizar reservas o procesos más complejos, Premium sería la mejor opción. Y si quieres que una IA responda preguntas frecuentes, puedes sumar Jeipy AI Lite sin cambiar de plan.";
-      break;
-    default:
-      verdict = `Te recomiendo **Básico**: lo que necesitas es una presencia digital clara y profesional para ${business}.`;
-      alternative =
-        cap === "basico"
-          ? "Lo que quedaría para más adelante es el catálogo, los formularios y el SEO básico del Esencial."
-          : "Si más adelante quieres catálogo, formularios o captar clientes de forma activa, Esencial sería el siguiente paso.";
+  if (budgetGap) {
+    verdict = `Te soy transparente: con ${formatCop(budget!)} todavía no alcanza ningún plan estándar. El de entrada es **Básico**, desde ${getPlan("basico").price}, y es la opción más cercana para ${business}.`;
+    alternative = "Se puede ajustar reduciendo el alcance, haciendo el proyecto por etapas o con una propuesta personalizada del equipo.";
+  } else if (downgraded) {
+    const cov = coverage(profile, tier);
+    const reason = budget !== undefined ? `dentro de tu presupuesto (${formatCop(budget)})` : "con una inversión menor";
+    verdict = `Para empezar ${reason}, te recomiendo **${tierLabel(tier)}**. Mantendrías ${joinNatural(cov.kept)}${
+      cov.lost.length ? `, y ${joinNatural(cov.lost)} ${plural(cov.lost) ? "quedarían" : "quedaría"} para una segunda etapa` : ""
+    }.`;
+    alternative = cov.lostWith.length
+      ? `Cuando quieras crecer, puedes sumar ${joinNatural(cov.lostWith)}.`
+      : `Cuando quieras crecer, ${tierLabel(ideal)} suma las funciones más avanzadas.`;
+    notes.push(...cov.workarounds);
+  } else {
+    switch (tier) {
+      case "premium":
+        verdict =
+          profile.features.ai && profile.aiLevel === "advanced" && aiTier
+            ? `Aquí ya necesitas automatización más profunda, no solo atención básica. **Premium** con **${aiName}** tiene más sentido porque permite ${joinNatural(
+                [profile.features.booking && "integrar reservas", "flujos personalizados", aiTier === "custom" ? "automatización diseñada para tu operación" : "un asistente comercial más completo"].filter(Boolean) as string[],
+              )}.`
+            : `Te recomiendo **Premium** porque necesitas ${joinNatural(pNeeds)}, algo que requiere desarrollo y flujos personalizados.${
+                aiTier ? ` Para la parte de IA, **${aiName}** es el complemento indicado.` : ""
+              }`;
+        alternative = profile.features.ai
+          ? "Si por ahora te basta con que la IA responda dudas y capte datos, sin reservas ni procesos automatizados, Esencial + Jeipy AI Lite sería suficiente con una inversión menor."
+          : "Si más adelante quieres que un asistente atienda y clasifique a tus clientes, Premium es compatible con Jeipy AI Pro. Y si no necesitas reservas ni integraciones, Esencial sería suficiente.";
+        break;
+      case "esencial-ai":
+        verdict = `Por lo que me cuentas, **Esencial** cubre bien la parte de ${joinNatural(
+          eNeeds.length ? eNeeds : ["presencia digital"],
+        )}. Como también quieres automatizar preguntas frecuentes, **Jeipy AI Lite** puede añadirse como complemento sin necesidad de pasar todavía a Premium.`;
+        alternative = "Si más adelante quieres que la IA gestione reservas, cotizaciones o clasifique clientes, ahí sí tendría sentido Premium con Jeipy AI Pro.";
+        break;
+      case "esencial":
+        verdict = `Te recomiendo **Esencial** porque necesitas ${joinNatural(eNeeds.length ? eNeeds : ["una presencia más completa"])}.`;
+        alternative =
+          "Si además quieres automatizar reservas o procesos más complejos, Premium sería la mejor opción. Y si quieres que una IA responda preguntas frecuentes, puedes sumar Jeipy AI Lite sin cambiar de plan.";
+        break;
+      default:
+        verdict = `Te recomiendo **Básico**: lo que necesitas es una presencia digital clara y profesional para ${business}.`;
+        alternative = "Si más adelante quieres catálogo, formularios o captar clientes de forma activa, Esencial sería el siguiente paso.";
+    }
   }
 
-  const notes: string[] = [];
-  let needsHuman = false;
   if (aiTier) notes.push(aiCostNote(aiTier));
-  if (profile.budget && profile.budget !== "skipped") {
-    const budget = profile.budget.amount;
-    const entry = planPriceValue(getPlan("basico"));
-    if (budget < entry) {
-      needsHuman = true;
-      notes.push(`Tu presupuesto (${formatCop(budget)}) está por debajo del plan de entrada (desde ${formatCop(entry)}). Lo mejor es revisarlo con el equipo.`);
-    } else if (budget < planPriceValue(getPlan(planId))) {
-      const fitting = [...ORDER].reverse().find((id) => planPriceValue(getPlan(id)) <= budget);
-      if (fitting && fitting !== planId) {
-        notes.push(`Con tu presupuesto (${formatCop(budget)}) podrías empezar con ${getPlan(fitting).name} y crecer después.`);
-      }
-    }
+  if (deferredAi) {
+    const deferred = getAiTier(deferredAi);
+    notes.push(`Con tu presupuesto, ${deferred.name} (configuración desde ${deferred.setup.price}) puede sumarse en una segunda etapa.`);
+  }
+  if (budget !== undefined && !budgetGap && !downgraded) {
+    notes.push(`Entra en tu presupuesto de ${formatCop(budget)}${aiTier ? "; la operación mensual de Jeipy AI va aparte" : ""}.`);
   }
 
   return {
@@ -212,11 +245,8 @@ export function recommendPlan(profile: Profile, cap?: PlanId): Recommendation {
     alternative,
     notes,
     verdict,
-    needsHuman,
+    needsHuman: budgetGap,
+    tier,
+    ideal,
   };
-}
-
-/** Plan inmediatamente inferior (para objeciones de precio). */
-export function lowerPlan(planId: PlanId): PlanId | undefined {
-  return ORDER[rank(planId) - 1];
 }

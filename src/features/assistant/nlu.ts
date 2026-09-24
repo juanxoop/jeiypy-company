@@ -28,6 +28,17 @@ export function isQuestion(raw: string): boolean {
    --------------------------------------------------------------- */
 
 export type Intent =
+  /** El visitante dio una cifra de presupuesto ("tengo 700 mil", "máximo un millón"). */
+  | { type: "budget"; amount: number }
+  /** Descarta funciones ("no quiero reservas", "sin IA"). */
+  | { type: "drop-feature"; features: Feature[] }
+  /** "No necesito todo eso", "prefiero comenzar pequeño". */
+  | { type: "objection-scope" }
+  /** "Solo necesito aparecer en internet". */
+  | { type: "presence" }
+  /** "¿Después podría ponerle IA?" */
+  | { type: "upgrade-later"; feature?: Feature }
+  | { type: "not-understood" }
   | { type: "callback" }
   | { type: "retry-submit" }
   | { type: "human" }
@@ -49,7 +60,8 @@ export type Intent =
   /** Un nivel concreto de Jeipy AI; `wants`: lo quiere (CTA), no solo pregunta por él. */
   | { type: "ai-tier"; tier: AiTierId; wants: boolean }
   | { type: "plan-info"; planId: PlanId }
-  | { type: "compare" }
+  /** `plans`: los planes mencionados; vacío = "esos dos", se resuelve con el contexto. */
+  | { type: "compare"; plans: PlanId[] }
   | { type: "prices" }
   | { type: "services" }
   | { type: "about" }
@@ -75,6 +87,14 @@ export function extractAiTier(t: string): AiTierId | undefined {
   return undefined;
 }
 
+const PLAN_WORDS_LIST = Object.entries(PLAN_WORDS) as [PlanId, string][];
+export function mentionedPlans(t: string): PlanId[] {
+  return PLAN_WORDS_LIST.filter(([, word]) => t.includes(word)).map(([id]) => id);
+}
+
+/** Palabras que niegan lo que viene después ("no quiero", "sin", "tampoco", "ni"). */
+const NEGATION = / (no|sin|nada de|tampoco|ni) /;
+
 /** Detecta la intención principal. El orden define la prioridad. */
 export function detectIntent(raw: string): Intent | null {
   const t = normalize(raw);
@@ -95,6 +115,18 @@ export function detectIntent(raw: string): Intent | null {
   }
   if (has(t, " dejar mis datos", " dejo mis datos", " que me contacten", " contactenme", " me pueden contactar", " escribanme"))
     return { type: "lead" };
+
+  // Presupuesto explícito: la cifra manda sobre cualquier otra lectura del mensaje.
+  const budget = extractBudgetStatement(raw);
+  if (budget) return { type: "budget", amount: budget };
+
+  // Descartar funciones ("no quiero reservas", "sin IA"): cambia el perfil, no es una pregunta.
+  const dropped = (Object.entries(extractFeatures(raw)) as [Feature, boolean][]).filter(([, v]) => v === false).map(([f]) => f);
+  if (dropped.length && NEGATION.test(t)) return { type: "drop-feature", features: dropped };
+
+  if (has(t, " no entendi", " no entiendo", " no me quedo claro", " explicame mejor", " explicamelo", " como asi ", " no comprendo", " me perdi"))
+    return { type: "not-understood" };
+
   // Mensualidad de Jeipy AI: nunca se inventa un valor.
   if (has(t, " mensualidad", " mensual", " al mes", " cada mes", " por mes", " mantenimiento")) return { type: "ai-monthly" };
 
@@ -108,9 +140,45 @@ export function detectIntent(raw: string): Intent | null {
   if (has(t, " quiero avanzar", " quiero contratar", " quiero empezar", " quiero arrancar", " empecemos", " vamos con", " lo quiero", " me lo llevo", " quiero ese plan"))
     return { type: "advance" };
 
-  if (has(t, " caro", " costoso", " muy alto", " no me alcanza", " no tengo tanto", " sale mucho", " mucha plata", " mucho dinero", " fuera de mi presupuesto", " mas barato", " economico"))
+  if (
+    has(
+      t,
+      " caro", " costoso", " muy alto", " sigue siendo alto", " no me alcanza", " no tengo tanto", " sale mucho",
+      " mucha plata", " mucho dinero", " fuera de mi presupuesto", " fuera del presupuesto", " sale de mi presupuesto",
+      " se sale de mi", " pasa de mi presupuesto", " mas barato", " mas barata", " economico", " economica", " no puedo pagar",
+      " no puedo invertir", " no me da el presupuesto", " menos plata", " menos dinero", " mas bajo", " rebaja", " descuento",
+    )
+  )
     return { type: "objection-price" };
-  if (has(t, " lo voy a pensar", " lo pienso", " lo pensare", " mas adelante lo", " despues te escribo", " luego te aviso", " todavia no estoy listo"))
+  if (
+    has(
+      t, " no necesito todo eso", " no necesito tanto", " es demasiado", " demasiadas cosas", " algo mas sencillo", " algo mas simple",
+      " algo sencillo", " comenzar pequeno", " empezar pequeno", " iniciar pequeno", " empezar con poco", " comenzar con poco",
+      " lo minimo", " lo justo", " paso a paso", " por etapas", " poco a poco",
+    )
+  )
+    return { type: "objection-scope" };
+  if (
+    has(t, " despues", " mas adelante", " luego", " en el futuro", " con el tiempo") &&
+    has(t, " podria", " puedo", " se puede", " agregar", " anadir", " sumar", " ponerle", " poner", " ampliar", " subir", " mejorar", " cambiar")
+  ) {
+    const feature = (Object.entries(extractFeatures(raw)) as [Feature, boolean][]).find(([, v]) => v)?.[0];
+    return { type: "upgrade-later", feature };
+  }
+  if (
+    has(
+      t, " aparecer en internet", " aparecer profesionalmente", " aparezca en internet", " que me encuentren", " me encuentren en internet",
+      " presencia en internet", " estar en internet", " tener presencia", " solo una pagina", " solo quiero una pagina", " pagina sencilla",
+      " una pagina basica", " verme profesional en internet",
+    )
+  )
+    return { type: "presence" };
+  if (
+    has(
+      t, " lo voy a pensar", " lo pienso", " lo pensare", " quiero pensarlo", " dejame pensarlo", " tengo que pensarlo", " pensarlo",
+      " mas adelante lo", " despues te escribo", " luego te aviso", " todavia no estoy listo", " lo consulto", " lo hablo con",
+    )
+  )
     return { type: "think-later" };
   if (has(t, " garantiz", " garantia", " aseguran", " seguro que", " resultados seguros", " prometen"))
     return { type: "guarantee" };
@@ -132,8 +200,9 @@ export function detectIntent(raw: string): Intent | null {
     return { type: "ai-pricing" };
   if (aboutAi) return { type: "ai-info" };
 
-  const mentioned = (Object.keys(PLAN_WORDS) as PlanId[]).filter((id) => t.includes(PLAN_WORDS[id]));
-  if (mentioned.length > 1 || has(t, " diferencia", " comparar", " compara", " versus", " vs ")) return { type: "compare" };
+  const mentioned = mentionedPlans(t);
+  if (mentioned.length > 1 || has(t, " diferencia", " comparar", " compara", " versus", " vs ", " esos dos", " entre ambos", " entre los dos"))
+    return { type: "compare", plans: mentioned };
   if (mentioned.length === 1) return { type: "plan-info", planId: mentioned[0] };
 
   if (has(t, " tiempo", " tarda", " demora", " plazo", " cuando estaria", " dias", " semanas")) return { type: "unknown-topic", topic: "timeline" };
@@ -275,14 +344,49 @@ const FEATURE_KEYWORDS: Record<Feature, string[]> = {
 };
 
 /** Funciones que el visitante menciona espontáneamente (solo afirmaciones). */
+/**
+ * ¿La palabra en `index` está negada? Mira las palabras anteriores dentro de la misma frase:
+ * "no quiero reservas" → negada; "no tengo web y quiero reservas" → no ("y" abre otra idea).
+ */
+function negatedAt(t: string, index: number): boolean {
+  const before = t.slice(Math.max(0, index - 40), index + 1);
+  const clause = before.split(/ pero | sino | aunque | y | mas bien | ademas |, /).pop() ?? "";
+  return NEGATION.test(` ${clause.trim()} `);
+}
+
+/** Funciones que menciona el mensaje: `true` si las quiere, `false` si las descarta. */
 export function extractFeatures(raw: string): FeatureMap {
   const t = normalize(raw);
   const found: FeatureMap = {};
   for (const feature of Object.keys(FEATURE_KEYWORDS) as Feature[]) {
-    if (has(t, ...FEATURE_KEYWORDS[feature])) found[feature] = true;
+    for (const keyword of FEATURE_KEYWORDS[feature]) {
+      const index = t.indexOf(keyword);
+      if (index === -1) continue;
+      const negated = negatedAt(t, index);
+      // Una mención positiva gana sobre una negada ("no quiero reservas pero sí citas" es raro; "sin IA" no).
+      if (!negated) found[feature] = true;
+      else if (found[feature] === undefined) found[feature] = false;
+    }
   }
   return found;
 }
+
+const BUDGET_CONTEXT = [
+  " tengo", " presupuesto", " maximo", " hasta", " puedo gastar", " puedo pagar", " puedo invertir", " cuento con", " dispongo",
+  " invertir", " alcanza", " mi limite", " tope", " no mas de", " menos de", " como mucho", " a lo sumo",
+];
+
+/** Cifra de presupuesto dicha en texto libre, solo si el contexto lo deja claro (no un teléfono). */
+export function extractBudgetStatement(raw: string): number | undefined {
+  const t = normalize(raw);
+  if (!has(t, ...BUDGET_CONTEXT) && !/^ \$?\s?[\d.,]+ ?(mil|millon|millones|k)? $/.test(t)) return undefined;
+  const budget = extractBudget(raw);
+  if (!budget || budget === "skipped") return undefined;
+  return budget.amount >= 100_000 && budget.amount <= 100_000_000 ? budget.amount : undefined;
+}
+
+/** Quiere algo de forma explícita: puede cambiar una respuesta anterior ("ahora sí quiero reservas"). */
+const EXPLICIT_WANT = [" quiero", " necesito", " me gustaria", " tambien", " ahora si", " si quiero", " agreguemos", " sumemos"];
 
 export type YesNo = "yes" | "no" | "later" | undefined;
 
@@ -299,6 +403,13 @@ export function extractBudget(raw: string): Budget | undefined {
   const t = normalize(raw);
   if (has(t, " prefiero no", " no se ", " no tengo idea", " omitir", " no quiero decir", " saltar", " no estoy seguro")) return "skipped";
 
+  if (has(t, " millon y medio", " millon quinientos")) return { amount: 1_500_000 };
+  if (has(t, " medio millon")) return { amount: 500_000 };
+  const wordMillions = t.match(/ (un|uno|dos|tres|cuatro|cinco) millon(?:es)?(?: (\d{3}) mil)?/);
+  if (wordMillions) {
+    const base = { un: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5 }[wordMillions[1] as "un"] * 1_000_000;
+    return { amount: base + (wordMillions[2] ? Number(wordMillions[2]) * 1_000 : 0) };
+  }
   const millions = t.match(/(\d+(?:[.,]\d+)?) ?(?:millon|millones|m )/);
   if (millions) return { amount: Math.round(parseFloat(millions[1].replace(",", ".")) * 1_000_000) };
 
@@ -337,10 +448,19 @@ export function enrichProfile(profile: Profile, raw: string): Profile {
   next.businessType ??= extractBusinessType(raw);
   next.website ??= extractWebsite(raw);
   next.goal ??= extractGoal(raw);
+  const t = normalize(raw);
+  const explicit = has(t, ...EXPLICIT_WANT);
   for (const [feature, value] of Object.entries(extractFeatures(raw)) as [Feature, boolean][]) {
-    if (next.features[feature] === undefined) next.features[feature] = value;
+    // Descartar siempre cuenta (es un cambio de opinión); sumar, si es nuevo o se pide de forma explícita.
+    if (value === false || next.features[feature] === undefined || explicit) next.features[feature] = value;
+  }
+  if (next.features.ai === false) {
+    next.aiLevel = undefined;
+    next.aiTier = undefined;
   }
   if (next.features.ai && !next.aiLevel) next.aiLevel = extractAiLevel(raw);
+  const budget = extractBudgetStatement(raw);
+  if (budget) next.budget = { amount: budget };
   return next;
 }
 

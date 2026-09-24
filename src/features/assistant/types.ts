@@ -1,6 +1,7 @@
 import type { JeipyAiTierId } from "@/data/jeipyAi";
 import type { Plan } from "@/data/plans";
 import type { ContactChannel, LeadIntent, LeadSubmission } from "@/features/leads/types";
+import type { Tier } from "./ladder";
 
 export type PlanId = Plan["id"];
 export type AiTierId = JeipyAiTierId;
@@ -72,8 +73,8 @@ export type Slot =
   | { kind: "confirm-contact" }
   /** Autorización para que Jeipy contacte al visitante. */
   | { kind: "consent" }
-  /** Confirmación de un plan alternativo propuesto ante una objeción. */
-  | { kind: "confirm-plan"; planId: PlanId };
+  /** Confirmación de una alternativa más económica (`tier`) frente a la que tenía (`from`). */
+  | { kind: "confirm-plan"; tier: Tier; from: Tier };
 
 /**
  * free: conversación abierta · advisor: diagnóstico para recomendar ·
@@ -91,6 +92,10 @@ export type ConversationState = {
   recommended?: PlanId;
   /** Nivel de Jeipy AI sugerido junto al plan recomendado. */
   recommendedAi?: AiTierId;
+  /** Nivel máximo que el visitante aceptó tras una objeción: las siguientes recomendaciones lo respetan. */
+  planCap?: Tier;
+  /** Los dos niveles de los que se está hablando, para entender "¿y la diferencia entre esos dos?". */
+  comparePair?: [Tier, Tier];
   /** El cliente ya vio las opciones de contacto (se ofrecen una sola vez al cerrar la cotización). */
   handoffOffered: boolean;
   /** Preguntas que el visitante prefirió no responder: no se repiten. */

@@ -23,6 +23,7 @@ import {
   extractBusinessType,
   extractChannel,
   extractEmail,
+  extractFeatures,
   extractGoal,
   extractName,
   extractPhone,
@@ -30,13 +31,25 @@ import {
   isBookingBusiness,
   isKnownBusiness,
   isQuestion,
+  mentionedPlans,
   normalize,
   parseAiLevelAnswer,
   parseYesNo,
   type Intent,
 } from "./nlu";
 import { FEATURE_LABEL, GOAL_LABEL, WEBSITE_LABEL, needsLabels } from "@/features/leads/labels";
-import { aiCostNote, lowerPlan, needsAiLevelQuestion, recommendPlan } from "./recommend";
+import {
+  coverage,
+  nextLowerTier,
+  tierAdds,
+  tierLabel,
+  tierOf,
+  tierPriceText,
+  tierRank,
+  tierCost,
+  type Tier,
+} from "./ladder";
+import { aiCostNote, needsAiLevelQuestion, pickTier, recommendPlan } from "./recommend";
 import type {
   AiTierId,
   AssistantBrain,
@@ -199,7 +212,10 @@ function question(slot: Slot, state: ConversationState): { blocks: MessageBlock[
         quickReplies: ["Sí, autorizo", "No, gracias"],
       };
     case "confirm-plan":
-      return { blocks: [text(`¿Quieres que lo ajustemos a ${getPlan(slot.planId).name}?`)], quickReplies: [`Sí, ver ${getPlan(slot.planId).name}`, "No, lo mantengo"] };
+      return {
+        blocks: [text("¿Te interesa esta alternativa?")],
+        quickReplies: ["Sí, me interesa", ...(slot.tier !== "basico" ? ["Sigue siendo alto"] : []), "¿Cuál es la diferencia?"],
+      };
     case "feature":
       switch (slot.feature) {
         case "catalog":
@@ -297,6 +313,9 @@ function fillSlot(slot: Slot, input: string, state: ConversationState): Filled |
       return next(value === "skipped" ? "Sin problema." : "Gracias, lo tengo en cuenta.");
     }
     case "feature": {
+      // "No quiero reservas" ante la pregunta de IA habla de otra función: no es la respuesta.
+      const mentioned = extractFeatures(input);
+      if (Object.keys(mentioned).length && mentioned[slot.feature] === undefined) return null;
       const answer = parseYesNo(input);
       if (!answer) return null;
       profile.features[slot.feature] = answer === "yes";
@@ -571,22 +590,26 @@ function startContact(flow: "lead" | "callback", state: ConversationState, intro
    Recomendación
    --------------------------------------------------------------- */
 
-function recommend(state: ConversationState, lead: MessageBlock[] = [], cap?: PlanId): Reply {
-  const { needsHuman, verdict, ...recommendation } = recommendPlan(state.profile, cap);
+function recommend(state: ConversationState, lead: MessageBlock[] = [], cap?: Tier): Reply {
+  const { needsHuman, verdict, tier, ideal, ...recommendation } = recommendPlan(state.profile, cap ?? state.planCap);
+  const lower = nextLowerTier(state.profile, tier);
   const next: ConversationState = {
     ...state,
     expecting: null,
     recommended: recommendation.planId,
     recommendedAi: recommendation.aiTier,
+    comparePair: tier !== ideal ? [ideal, tier] : lower ? [tier, lower] : state.comparePair,
     retries: 0,
   };
   const blocks: MessageBlock[] = [...lead, text(verdict), recommendation];
 
+  // Presupuesto por debajo del plan de entrada: opciones honestas y, ahora sí, el equipo.
   if (needsHuman) {
     return {
       blocks: [
         ...blocks,
-        text("Tu caso vale la pena revisarlo con una persona del equipo para ajustar el alcance a tu presupuesto."),
+        text("Para que igual puedas avanzar, estas son las opciones:"),
+        { type: "list", items: BUDGET_OPTIONS },
         closingBlock(next),
       ],
       quickReplies: [],
@@ -600,7 +623,12 @@ function recommend(state: ConversationState, lead: MessageBlock[] = [], cap?: Pl
   }
 
   // Cierre comercial: asesor ahora o solicitud de llamada, con el mismo protagonismo.
-  return { blocks: [...blocks, closingBlock(next)], quickReplies: [], state: { ...next, flow: "free", handoffOffered: true } };
+  // Las sugerencias solo aceleran: el visitante puede escribir lo que quiera.
+  return {
+    blocks: [...blocks, closingBlock(next)],
+    quickReplies: lower ? ["Algo más económico", "¿Qué incluye exactamente?"] : ["¿Qué incluye exactamente?"],
+    state: { ...next, flow: "free", handoffOffered: true },
+  };
 }
 
 /** Continúa el flujo: siguiente pregunta o, si ya hay suficiente, el siguiente paso. */
@@ -661,38 +689,263 @@ function unknownTopic(topic: UnknownTopic, state: ConversationState): Reply {
   };
 }
 
-function priceObjection(state: ConversationState): Reply {
-  const current = state.recommended;
+/* ---------------------------------------------------------------
+   Escalera comercial: objeciones, presupuesto y cambios de opinión
+   --------------------------------------------------------------- */
+
+const BUDGET_OPTIONS = [
+  "**Reducir el alcance** a lo esencial para empezar.",
+  "**Hacer el proyecto por etapas** y sumar funciones después.",
+  "**Empezar con un plan inferior** y crecer cuando el negocio lo permita.",
+  "**Hablar con un asesor** para una propuesta personalizada.",
+];
+
+const hasNeeds = (profile: Profile) => Boolean(profile.goal) || Object.values(profile.features).some(Boolean);
+
+/** Nivel del que parte la objeción: la recomendación vigente, el plan mencionado o el ideal según lo contado. */
+function currentTier(state: ConversationState, mentioned: PlanId[] = []): Tier | undefined {
+  if (state.recommended) return tierOf(state.recommended, state.recommendedAi);
+  const plan = [...mentioned].sort((a, b) => tierRank(b) - tierRank(a))[0];
+  if (plan) return plan === "esencial" && state.profile.features.ai ? "esencial-ai" : plan;
+  return hasNeeds(state.profile) ? pickTier(state.profile) : undefined;
+}
+
+/**
+ * Objeción de precio o de alcance: antes de pasar a una persona, se busca el siguiente peldaño
+ * que cubra una parte razonable de lo que necesita y se explica qué conserva y qué pierde.
+ */
+function offerCheaper(state: ConversationState, kind: "price" | "scope", from?: Tier, mentioned: PlanId[] = []): Reply {
+  const current = from ?? currentTier(state, mentioned);
   if (!current) {
     return startFlow(
       "advisor",
       state,
-      "Entiendo, la inversión importa. Para no recomendarte de más, veamos qué necesitas de verdad.",
+      kind === "price"
+        ? "Entiendo, la inversión importa. Para no recomendarte de más, veamos qué necesitas de verdad."
+        : "Perfecto, empecemos por lo necesario. Para no recomendarte de más, cuéntame un poco de tu negocio.",
     );
   }
-  const lower = lowerPlan(current);
-  if (!lower) {
+  const lower = nextLowerTier(state.profile, current);
+  if (!lower) return entryOptions(state);
+
+  const cov = coverage(state.profile, lower);
+  const ack = from ? "Entiendo." : kind === "price" ? "Entiendo. Podemos simplificar la solución." : "Tiene sentido empezar con lo necesario.";
+  const budget = state.profile.budget && state.profile.budget !== "skipped" ? state.profile.budget.amount : undefined;
+  const blocks: MessageBlock[] = [
+    text(
+      `${ack} Por lo que me contaste, podrías comenzar con **${tierLabel(lower)}** (${tierPriceText(lower)})${
+        cov.lost.length ? ` y dejar ${joinNatural(cov.lost)} para una segunda etapa` : ""
+      }. Mantendrías ${joinNatural(cov.kept)}.`,
+    ),
+  ];
+  if (cov.workarounds.length) blocks.push(text(cov.workarounds.join(" ")));
+  if (budget !== undefined && tierCost(lower) > budget) {
+    blocks.push(text(`Aun así, estaría por encima de tu presupuesto de ${formatCop(budget)}.`));
+  }
+  const slot: Slot = { kind: "confirm-plan", tier: lower, from: current };
+  const q = question(slot, state);
+  return {
+    blocks: [...blocks, ...q.blocks],
+    quickReplies: q.quickReplies,
+    state: { ...state, expecting: slot, comparePair: [current, lower], retries: 0 },
+  };
+}
+
+/** Ya en el plan de entrada: se dice con transparencia y ahora sí se ofrece el equipo. */
+function entryOptions(state: ConversationState): Reply {
+  const basico = getPlan("basico");
+  const next: ConversationState = { ...state, expecting: null, flow: "free", handoffOffered: true };
+  return {
+    blocks: [
+      text(
+        `Entiendo. **${basico.name}** es nuestro plan de entrada (desde ${basico.price}): presencia profesional con información del negocio, WhatsApp, ubicación y contacto. Para ajustar aún más la inversión, hay varias opciones:`,
+      ),
+      { type: "list", items: BUDGET_OPTIONS },
+      closingBlock(next),
+    ],
+    quickReplies: [],
+    state: next,
+  };
+}
+
+/** Comparación en contexto: "¿cuál es la diferencia entre esos dos?". */
+function compareTiers(state: ConversationState, pair: [Tier, Tier]): MessageBlock[] {
+  const [hi, lo] = tierRank(pair[0]) >= tierRank(pair[1]) ? pair : [pair[1], pair[0]];
+  if (hi === lo) return [text(`Es el mismo nivel: **${tierLabel(hi)}** (${tierPriceText(hi)}).`)];
+  const cov = coverage(state.profile, lo);
+  return [
+    text(`La diferencia entre **${tierLabel(hi)}** y **${tierLabel(lo)}**:`),
+    {
+      type: "list",
+      items: [
+        `**${tierLabel(hi)}** (${tierPriceText(hi)}): suma ${joinNatural(tierAdds(state.profile, lo, hi))}.`,
+        `**${tierLabel(lo)}** (${tierPriceText(lo)}): ${
+          cov.lost.length ? `mantiene ${joinNatural(cov.kept)}, pero sin ${joinNatural(cov.lost)}` : `cubre ${joinNatural(cov.kept)}`
+        }.`,
+      ],
+    },
+    ...(cov.workarounds.length ? [text(cov.workarounds.join(" "))] : []),
+    text("Con cualquiera de los dos puedes crecer después por etapas."),
+  ];
+}
+
+/** Presupuesto dicho en texto libre: se usa para adaptar la recomendación, nunca se ignora. */
+function applyBudget(state: ConversationState, amount: number, input = ""): Reply {
+  const next: ConversationState = {
+    ...state,
+    expecting: null,
+    planCap: undefined,
+    profile: { ...enrichProfile(state.profile, input), budget: { amount } },
+  };
+  const ready = next.recommended || !nextSlot({ ...next, flow: "advisor" });
+  if (ready) return recommend(next, [text(`Gracias, con un presupuesto de ${formatCop(amount)} ajusto la recomendación.`)]);
+
+  const entry = getPlan("basico");
+  if (tierCost("basico") > amount) {
+    return startFlow(
+      "advisor",
+      next,
+      `Te soy transparente: con ${formatCop(amount)} todavía no alcanza nuestro plan de entrada (**${entry.name}**, desde ${entry.price}). Podemos reducir el alcance, hacerlo por etapas o revisar una propuesta personalizada con un asesor. Primero cuéntame un poco de tu negocio para ver qué sería lo mínimo necesario.`,
+    );
+  }
+  const plans: PlanId[] = ["basico", "esencial", "premium"];
+  const fits = plans.filter((id) => tierCost(id) <= amount).pop()!;
+  const above = plans[plans.indexOf(fits) + 1];
+  return startFlow(
+    "advisor",
+    next,
+    `Perfecto, con ${formatCop(amount)} entra **${getPlan(fits).name}** (desde ${getPlan(fits).price})${
+      above ? `; ${getPlan(above).name} (desde ${getPlan(above).price}) quedaría por encima` : ""
+    }. Para confirmar que cubre lo que necesitas, cuéntame un poco más.`,
+  );
+}
+
+/** Tras un cambio en el perfil: recomienda de nuevo si ya había recomendación, o sigue el diagnóstico. */
+function continueWith(state: ConversationState, lead: MessageBlock[]): Reply {
+  if (state.recommended) {
+    const before = tierOf(state.recommended, state.recommendedAi);
+    const reply = recommend(state, lead);
+    const after = reply.state.recommended ? tierOf(reply.state.recommended, reply.state.recommendedAi) : before;
+    if (after !== before) reply.blocks.splice(lead.length, 0, text("Con eso cambia mi recomendación."));
+    return reply;
+  }
+  return startFlow(state.flow === "quote" ? "quote" : "advisor", state, "", lead);
+}
+
+const FEATURE_SHORT: Record<Feature, string> = {
+  catalog: "catálogo",
+  booking: "reservas",
+  forms: "formularios",
+  ai: "IA",
+  integrations: "integraciones",
+  seo: "SEO",
+  automation: "automatizaciones",
+};
+
+/** "No quiero reservas", "sin IA": se respeta el cambio y se ajusta la propuesta. */
+function dropFeatures(state: ConversationState, input: string, features: Feature[]): Reply {
+  const profile = enrichProfile(state.profile, input);
+  for (const f of features) profile.features[f] = false;
+  const ack = `Entendido, sin ${joinNatural(features.map((f) => FEATURE_SHORT[f]))}.`;
+  return continueWith({ ...state, profile, expecting: null }, [text(ack)]);
+}
+
+/** "Solo necesito aparecer en internet": presencia profesional, sin funciones que no pidió. */
+function presenceOnly(state: ConversationState, input: string): Reply {
+  const t = normalize(input);
+  const known = enrichProfile(state.profile, input);
+  const f = { ...known.features };
+  for (const key of ["catalog", "booking", "forms", "ai", "automation", "integrations"] as Feature[]) f[key] = false;
+  const wantsGoogle = t.includes(" encuentren") || t.includes(" google") || t.includes(" buscador");
+  const profile: Profile = { ...known, features: f, goal: "image", aiLevel: undefined, aiTier: undefined };
+  const intro = `Entendido: lo que buscas es una presencia profesional en internet. Para eso, **Básico** suele ser suficiente: página informativa con tu información, WhatsApp, ubicación y contacto, con diseño profesional.${
+    wantsGoogle ? " Si además quieres posicionarte mejor en las búsquedas de Google, Esencial incluye SEO básico." : ""
+  }`;
+  return continueWith({ ...state, profile, planCap: undefined, expecting: null }, [text(intro)]);
+}
+
+/** "¿Después podría ponerle IA?": sí, por etapas, sin prometer lo que el plan no trae. */
+function upgradeLater(state: ConversationState, feature?: Feature): MessageBlock[] {
+  const tier = state.recommended ? tierOf(state.recommended, state.recommendedAi) : undefined;
+  const lite = getAiTier("lite");
+  const pro = getAiTier("pro");
+  if (feature === "ai") {
+    const answer =
+      tier === "basico"
+        ? `Sí, pero Jeipy AI se suma desde Esencial: primero pasarías de Básico a Esencial y luego agregarías **${lite.name}** (configuración desde ${lite.setup.price} + operación mensual según uso).`
+        : tier === "esencial"
+          ? `Sí. **${lite.name}** se puede sumar más adelante a Esencial sin cambiar de plan: configuración desde ${lite.setup.price} + operación mensual según uso.`
+          : tier === "esencial-ai"
+            ? `Ya lo tienes contemplado con **${lite.name}**. Si más adelante necesitas reservas o clasificar clientes, podrías pasar a Premium con **${pro.name}**.`
+            : tier === "premium"
+              ? `Sí. Premium es compatible con **${pro.name}**, que se puede sumar después: configuración desde ${pro.setup.price} + operación mensual según uso.`
+              : `Sí. Puedes empezar sin IA y sumarla después: **${lite.name}** se añade a Esencial y **${pro.name}** acompaña a Premium.`;
+    return [text(answer)];
+  }
+  return [
+    text(
+      "Sí, puedes empezar con lo necesario y crecer por etapas: por ejemplo, pasar de Básico a Esencial para sumar catálogo y formularios, o de Esencial a Premium para reservas y automatizaciones. El equipo te confirma cómo se ajustan el alcance y el valor en cada etapa.",
+    ),
+  ];
+}
+
+/** "No entendí": se explica más simple lo último, sin reiniciar. */
+const SLOT_EXPLANATION: Partial<Record<Slot["kind"] | `feature:${Feature}`, string>> = {
+  businessType: "Solo necesito saber a qué se dedica tu negocio; por ejemplo, restaurante, barbería, tienda o consultorio.",
+  website: "Te pregunto si hoy ya tienes una página web propia o si solo usas redes sociales y WhatsApp.",
+  goal: "Te pregunto qué es lo más importante para ti: conseguir más clientes, verte más profesional, mostrar lo que vendes o automatizar la atención.",
+  "feature:catalog": "Me refiero a una sección donde tus clientes vean tus productos o servicios con sus precios.",
+  "feature:booking": "Me refiero a que tus clientes puedan apartar una cita o reserva desde la web, sin tener que escribirte.",
+  "feature:forms": "Me refiero a un formulario donde el cliente deja su solicitud y te llega directamente.",
+  "feature:ai": "Me refiero a un asistente como yo en tu página, que responde las preguntas de tus clientes a cualquier hora.",
+  aiLevel:
+    "Te lo pongo más simple: ¿quieres que el asistente solo conteste preguntas y tome datos (Jeipy AI Lite), o que además agende citas y organice a tus clientes (Jeipy AI Pro)?",
+  budget: "Es un valor aproximado de lo que piensas invertir en la página. Es opcional.",
+  consent: "Te pido permiso para que el equipo de Jeipy te contacte sobre esta solicitud. Sin tu autorización no enviamos nada.",
+};
+
+function explainAgain(state: ConversationState): Reply {
+  const slot = state.expecting;
+  if (slot) {
+    if (slot.kind === "confirm-plan") {
+      return {
+        blocks: [
+          text(
+            `En simple: **${tierLabel(slot.tier)}** cuesta menos que **${tierLabel(slot.from)}**, pero trae menos funciones. Te lo muestro lado a lado:`,
+          ),
+          ...compareTiers(state, [slot.from, slot.tier]),
+          ...question(slot, state).blocks,
+        ],
+        quickReplies: question(slot, state).quickReplies,
+        state,
+      };
+    }
+    const q = question(slot, state);
+    const explanation = SLOT_EXPLANATION[slotKey(slot) as keyof typeof SLOT_EXPLANATION] ?? "Te lo pregunto para recomendarte solo lo que necesitas.";
+    return { blocks: [text(explanation), ...q.blocks], quickReplies: q.quickReplies, state };
+  }
+  if (state.recommended) {
+    const tier = tierOf(state.recommended, state.recommendedAi);
+    const { because } = recommendPlan(state.profile, state.planCap);
+    const reason = because.find((b) => /^(Quieres|Necesitas|Buscas)/.test(b)) ?? because[0];
     return {
       blocks: [
         text(
-          `Entiendo. ${getPlan(current).name} es el punto de entrada, y el valor final depende del alcance. Lo mejor es revisar con el equipo qué se puede ajustar a tu presupuesto, sin compromiso.`,
+          `Te lo resumo en simple: te recomiendo **${tierLabel(tier)}** (${tierPriceText(tier)}) porque ${lowerFirst(reason ?? "es lo que mejor se ajusta a lo que me contaste.").replace(/\.$/, "")}. Si prefieres algo más económico o tienes otra duda, escríbeme con tus palabras.`,
         ),
-        closingBlock(state),
       ],
-      quickReplies: [],
-      state: { ...state, handoffOffered: true },
+      quickReplies: ["Algo más económico", "¿Qué incluye exactamente?", "Tengo otra duda"],
+      state,
     };
   }
-  const lost =
-    current === "premium"
-      ? "Si no necesitas automatización avanzada, reservas ni integraciones por ahora, probablemente Esencial cubra lo importante (web completa, catálogo y captación) con una inversión menor."
-      : "Si por ahora lo prioritario es tener presencia profesional, Básico cubre página informativa, WhatsApp, ubicación y contacto con una inversión menor. Lo que dejarías para después es el catálogo y los formularios.";
-  const slot: Slot = { kind: "confirm-plan", planId: lower };
-  const q = question(slot, state);
   return {
-    blocks: [text(`Entiendo. Revisemos qué funciones son realmente necesarias para tu negocio. ${lost}`), ...q.blocks],
-    quickReplies: q.quickReplies,
-    state: { ...state, expecting: slot },
+    blocks: [
+      text(
+        "Te explico en simple: tenemos tres planes web. **Básico** es para tener presencia profesional, **Esencial** para mostrar lo que vendes y captar clientes, y **Premium** para automatizar reservas y procesos. Jeipy AI se suma aparte si quieres un asistente. Cuéntame a qué se dedica tu negocio y te digo cuál te sirve.",
+      ),
+    ],
+    quickReplies: CHIPS.start,
+    state,
   };
 }
 
@@ -747,7 +1000,24 @@ function answerIntent(intent: Intent, state: ConversationState): Reply | null {
         quickReplies: ["¿Qué plan me conviene?", "¿Cuánto cuesta Jeipy AI?", "¿Qué diferencia hay entre planes?"],
         state,
       };
-    case "compare":
+    case "upgrade-later":
+      return {
+        blocks: upgradeLater(state, intent.feature),
+        quickReplies: state.recommended ? ["Quiero avanzar", "Tengo otra duda"] : CHIPS.afterInfo,
+        state,
+      };
+    case "compare": {
+      // "¿Y la diferencia entre esos dos?": se resuelve con lo que se está conversando.
+      const rec = state.recommended ? tierOf(state.recommended, state.recommendedAi) : undefined;
+      const pair: [Tier, Tier] | undefined =
+        intent.plans.length === 1 && rec ? [rec, intent.plans[0]] : intent.plans.length === 0 ? state.comparePair : undefined;
+      if (pair) {
+        return {
+          blocks: compareTiers(state, pair),
+          quickReplies: state.recommended ? ["Algo más económico", "Quiero avanzar", "Tengo otra duda"] : CHIPS.afterInfo,
+          state,
+        };
+      }
       return {
         blocks: [
           {
@@ -763,6 +1033,7 @@ function answerIntent(intent: Intent, state: ConversationState): Reply | null {
         quickReplies: ["¿Qué plan me conviene?", "Quiero cotizar una página"],
         state,
       };
+    }
     case "plan-info":
       return planInfo(intent.planId, state);
     case "process":
@@ -884,17 +1155,36 @@ export function respond(input: string, current: ConversationState): Reply {
     const slot = current.expecting;
 
     if (slot.kind === "confirm-plan") {
-      const answer = parseYesNo(input) ?? (t.includes(" ver ") ? "yes" : undefined);
+      const base: ConversationState = { ...current, expecting: null };
+      // "Sigue siendo alto": un peldaño más abajo, siempre explicando qué se pierde.
+      if (intent?.type === "objection-price" || intent?.type === "objection-scope" || t.includes(" sigue siendo")) {
+        return offerCheaper(base, intent?.type === "objection-scope" ? "scope" : "price", slot.tier);
+      }
+      if (intent?.type === "budget") return applyBudget(base, intent.amount);
+      if (intent?.type === "not-understood") return explainAgain(current);
+      if (intent?.type === "compare" || t.includes(" diferencia")) {
+        const q = question(slot, current);
+        return { blocks: [...compareTiers(current, [slot.from, slot.tier]), ...q.blocks], quickReplies: q.quickReplies, state: current };
+      }
+      const answer = parseYesNo(input) ?? (t.includes(" me interesa") || t.includes(" me sirve") || t.includes(" ver ") ? "yes" : undefined);
       if (answer === "yes") {
-        return recommend({ ...current, expecting: null }, [text("Perfecto, ajustemos la propuesta.")], slot.planId);
+        return recommend({ ...base, planCap: slot.tier }, [text("Perfecto, ajustemos la propuesta.")], slot.tier);
       }
       if (answer === "no" || t.includes(" lo mantengo")) {
+        if (!current.recommended) return recommend(base, [text("Perfecto, mantengamos la opción completa.")]);
         return {
-          blocks: [text(`Perfecto, mantenemos ${getPlan(current.recommended ?? "esencial").name}. El valor final se confirma al revisar el alcance, así que hay margen para ajustarlo con el equipo.`)],
+          blocks: [
+            text(
+              `Perfecto, mantenemos ${tierLabel(slot.from)}. El valor final se confirma al revisar el alcance, así que hay margen para ajustarlo con el equipo.`,
+            ),
+          ],
           quickReplies: ["Quiero avanzar", "Tengo otra duda"],
-          state: { ...current, expecting: null },
+          state: base,
         };
       }
+    } else if (intent?.type === "not-understood") {
+      // "No entiendo" no es un "no": se explica la pregunta.
+      return explainAgain(current);
     } else if (slot.kind === "consent") {
       const t2 = normalize(input);
       if (t2.includes(" autorizo") || t2.includes(" acepto") || parseYesNo(input) === "yes") return submitLead(current);
@@ -914,6 +1204,27 @@ export function respond(input: string, current: ConversationState): Reply {
       }
     }
 
+    // Texto libre a mitad del diagnóstico: se aprovecha sin reiniciar ni repetir preguntas.
+    const diagnosing = !CONTACT_SLOTS.has(slot.kind);
+    if (intent?.type === "budget") {
+      const state: ConversationState = { ...current, expecting: null, profile: { ...current.profile, budget: { amount: intent.amount } } };
+      return advance(state, [text(`Anotado: presupuesto de ${formatCop(intent.amount)}. Lo tendré en cuenta en la recomendación.`)]);
+    }
+    if (diagnosing && intent?.type === "drop-feature") {
+      const profile = enrichProfile(current.profile, input);
+      for (const f of intent.features) profile.features[f] = false;
+      return advance({ ...current, profile, expecting: null }, [text(`Entendido, sin ${joinNatural(intent.features.map((f) => FEATURE_SHORT[f]))}.`)]);
+    }
+    if (diagnosing && intent?.type === "presence") return presenceOnly(current, input);
+    if (diagnosing && !current.recommended && (intent?.type === "objection-price" || intent?.type === "objection-scope")) {
+      const q = question(slot, current);
+      return {
+        blocks: [text("Lo tengo en cuenta: te voy a recomendar solo lo necesario, sin pasarme de lo que quieres invertir."), ...q.blocks],
+        quickReplies: q.quickReplies,
+        state: current,
+      };
+    }
+
     // "¿Cuál es mejor?" o "no sé" a mitad del diagnóstico: se explica para qué son las preguntas.
     if (intent && ["which-best", "unsure", "recommend"].includes(intent.type)) {
       const q = question(slot, current);
@@ -927,7 +1238,7 @@ export function respond(input: string, current: ConversationState): Reply {
     // Una duda, objeción o petición en medio del diagnóstico: se atiende y se retoma.
     if (intent && !["quote", "recommend", "digitalize", "which-best", "unsure"].includes(intent.type)) {
       if (intent.type === "ai-tier" && intent.wants) return startAiTierFlow(intent.tier, { ...current, expecting: null });
-      if (["human", "lead", "objection-price", "advance", "callback", "restart"].includes(intent.type)) {
+      if (["human", "lead", "objection-price", "objection-scope", "advance", "callback", "restart"].includes(intent.type)) {
         return respond(input, { ...current, expecting: null });
       }
       const answer = answerIntent(intent, current);
@@ -1008,7 +1319,19 @@ export function respond(input: string, current: ConversationState): Reply {
   if (intent?.type === "advance") {
     return startFlow("quote", { ...current, profile: enrichProfile(current.profile, input) }, "¡Genial! Antes de preparar la propuesta, entendamos bien tu proyecto.");
   }
-  if (intent?.type === "objection-price") return priceObjection(current);
+  // Objeciones y cambios de opinión: primero se intenta una alternativa viable, no el traspaso.
+  if (intent?.type === "budget") return applyBudget(current, intent.amount, input);
+  if (intent?.type === "objection-price" || intent?.type === "objection-scope") {
+    return offerCheaper(
+      { ...current, profile: enrichProfile(current.profile, input) },
+      intent.type === "objection-price" ? "price" : "scope",
+      undefined,
+      mentionedPlans(t),
+    );
+  }
+  if (intent?.type === "drop-feature") return dropFeatures(current, input, intent.features);
+  if (intent?.type === "presence") return presenceOnly(current, input);
+  if (intent?.type === "not-understood") return explainAgain(current);
 
   if (t.includes(" seguir con el asistente") || t.includes(" tengo otra duda")) {
     return {

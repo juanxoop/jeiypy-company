@@ -123,7 +123,8 @@ src/features/assistant/
   types.ts                       perfil, estados, bloques de mensaje, contrato AssistantBrain
   knowledge.ts                   base de conocimiento (derivada de src/data)
   nlu.ts                         normalización, intenciones y extracción de datos
-  recommend.ts                   recomendación con razones, alternativa y notas
+  recommend.ts                   recomendación con razones, alternativa, notas y ajuste al presupuesto
+  ladder.ts                      escalera comercial: necesidades, qué conserva y qué pierde cada nivel, presupuesto
   engine.ts                      lógica de conversación (motor local = AssistantBrain)
   useAssistant.ts                estado de la conversación, persistencia y envío del lead a /api/leads
   components/
@@ -161,12 +162,31 @@ src/features/assistant/
 **Objeciones:**
 | El visitante dice | Jeipy AI |
 | --- | --- |
-| "Está muy caro" | Revisa qué funciones son necesarias, propone el plan inferior diciendo qué se dejaría para después y pregunta si lo ajusta. En el plan de entrada, ofrece revisarlo con el equipo. |
+| "Está muy caro", "¿Y algo más barato?", "Se sale de mi presupuesto" | Escalera comercial (ver abajo): propone el siguiente nivel, explica qué conserva y qué pierde, y pregunta si le interesa. Solo al agotar la escalera ofrece asesor o llamada. |
+| "No necesito todo eso", "Prefiero comenzar pequeño" | Igual que la objeción de precio, pero desde el alcance: "Tiene sentido empezar con lo necesario…". |
+| "Tengo 700 mil", "No puedo gastar más de un millón" | Usa la cifra: recomienda el nivel más alto que entra en ella y explica qué queda para una segunda etapa. Si nada alcanza, lo dice y propone reducir alcance, etapas, un plan inferior o un asesor. |
+| "No quiero reservas", "Sin IA" | Respeta el cambio, ajusta el perfil y, si ya había recomendación, la recalcula ("Con eso cambia mi recomendación"). |
+| "Solo necesito aparecer en internet" | Presencia profesional → Básico. Si menciona Google, aclara que el SEO básico está en Esencial. |
+| "¿Después podría ponerle IA?" | Sí, por etapas y según el plan: Lite se suma a Esencial; desde Básico primero hay que pasar a Esencial; Pro acompaña a Premium. |
+| "¿Cuál es la diferencia entre esos dos?" | Compara los dos niveles de los que se está hablando (la alternativa ofrecida o la recomendación y su vecino). |
+| "No entendí" | Explica más simple la última pregunta o la recomendación, sin reiniciar. "No entiendo" nunca se toma como un "no". |
 | "No sé qué necesito" | Lo guía con preguntas cortas. |
 | "¿Cuál es mejor?" | "Depende de lo que quieras lograr…" y dos preguntas antes de recomendar (también a mitad del diagnóstico). |
 | "Lo voy a pensar" | Sin presión: ofrece dejar el resumen para revisarlo con calma. |
 | "¿Garantizan resultados?" | No promete resultados. Explica cómo está pensada la web para convertir. |
 | "¿Cuánto es la mensualidad?" | No da cifras: explica qué cubre, que depende del uso y del alcance, los ajustes incluidos por nivel, y ofrece continuar el diagnóstico. |
+
+**Escalera comercial** (objeción de precio o alcance): `Premium → Esencial + Jeipy AI Lite → Esencial → Básico`. Esencial + Lite solo aparece si el visitante quiere IA.
+1. Reconoce la objeción en una frase ("Podemos simplificar la solución").
+2. Revisa las necesidades ya detectadas.
+3. Propone el siguiente nivel con su precio.
+4. Explica qué se mantiene y qué queda para una segunda etapa, con alternativas honestas: por ejemplo, reservas por formulario o WhatsApp, pero sin agenda automática.
+5. Pregunta "¿Te interesa esta alternativa?": "Sí, me interesa" (o cualquier sí), "Sigue siendo alto" (baja otro peldaño) o "¿Cuál es la diferencia?".
+6. Solo en el plan de entrada ofrece opciones (reducir alcance, etapas, asesor) junto con el cierre comercial.
+
+El nivel aceptado queda como tope (`planCap`) y las recomendaciones siguientes lo respetan. Nunca promete funciones que el nivel no incluye. Prefiere cerrar un Básico bien explicado antes que perder al cliente insistiendo en Premium.
+
+**Texto libre:** las sugerencias rápidas solo aceleran la conversación. Cualquier mensaje se interpreta con el contexto: presupuesto, negaciones ("no quiero…"), cambios de opinión ("ahora sí quiero reservas"), dudas y objeciones, también a mitad del diagnóstico, sin reiniciarlo ni repetir preguntas ya respondidas.
 
 **Cierre comercial:** tras la recomendación aparece "Tu recomendación está lista" y "¿Cómo quieres continuar?", con dos opciones del mismo peso:
 - **Hablar ahora con un asesor:** abre WhatsApp con un mensaje breve (nombre, negocio, plan recomendado y necesidad principal), sin teléfono ni correo en la URL. Si no hay número configurado, inicia la solicitud de llamada.
