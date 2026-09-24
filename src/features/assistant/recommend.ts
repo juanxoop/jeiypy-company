@@ -4,16 +4,20 @@
  * Niveles:
  * - Básico: presencia digital (página informativa, WhatsApp, ubicación, contacto, servicios básicos).
  * - Esencial: captación, catálogo, formularios, SEO básico, Analytics, estructura comercial.
- * - Esencial + Jeipy AI opcional: lo anterior + IA ligera (dudas, orientación, datos básicos).
+ * - Esencial + Jeipy AI Lite (opcional): lo anterior + IA ligera (dudas, orientación, datos básicos).
  * - Premium: reservas, cotizaciones o procesos automatizados, integraciones, clasificación y
- *   seguimiento de clientes, IA avanzada o una solución muy personalizada.
+ *   seguimiento de clientes. Si quiere IA, se combina con Jeipy AI Pro.
+ * - Proyectos especiales (integraciones + automatización a medida): Premium + Jeipy AI Custom.
+ *
+ * Jeipy AI nunca está incluido en el precio del plan web: tiene configuración inicial (pago único)
+ * y una operación mensual según uso, que el asistente no cuantifica.
  *
  * Mencionar "IA" no lleva a Premium: decide el nivel de automatización. Busca la solución
  * adecuada, no la más cara, y explica: plan · por qué · qué cubre · qué cambiaría la elección.
  */
-import { formatCop, getPlan, planPriceValue } from "./knowledge";
+import { formatCop, getAiTier, getPlan, planPriceValue } from "./knowledge";
 import { isKnownBusiness } from "./nlu";
-import type { MessageBlock, PlanId, Profile } from "./types";
+import type { AiTierId, MessageBlock, PlanId, Profile } from "./types";
 
 type Recommendation = Extract<MessageBlock, { type: "recommendation" }> & {
   /** Frase principal que resume la recomendación. */
@@ -101,20 +105,37 @@ function becauseList(profile: Profile, tier: Tier): string[] {
   return ordered.slice(0, 4);
 }
 
-const COVERS: Record<Tier, string[]> = {
+/** Nivel de Jeipy AI que acompaña al plan, si el visitante quiere IA. */
+export function pickAiTier(profile: Profile, tier: Tier): AiTierId | undefined {
+  const f = profile.features;
+  if (!f.ai && !profile.aiTier) return undefined;
+  if (tier === "esencial-ai") return "lite";
+  if (tier !== "premium") return undefined;
+  if (profile.aiTier === "custom" || (f.integrations && f.automation)) return "custom";
+  return "pro";
+}
+
+const WEB_COVERS: Record<Tier, string[]> = {
   basico: ["Página informativa con diseño responsive", "WhatsApp, ubicación y contacto", "Información y servicios principales del negocio"],
   esencial: ["Web completa con varias secciones", "Catálogo de productos o servicios", "Formularios, SEO básico y Analytics", "Integración con WhatsApp y optimización"],
-  "esencial-ai": [
-    "Todo lo del Esencial: web completa, catálogo, formularios, SEO básico y Analytics",
-    "Jeipy AI ligero: responde preguntas frecuentes, explica tus servicios, orienta y capta datos básicos",
-  ],
-  premium: [
-    "Diseño y desarrollo personalizado",
-    "Reservas, flujos e integraciones según el proyecto",
-    "Jeipy AI avanzado: gestiona solicitudes, clasifica clientes y automatiza procesos",
-    "Soporte, acompañamiento y actualizaciones",
-  ],
+  "esencial-ai": ["Todo lo del Esencial: web completa, catálogo, formularios, SEO básico y Analytics"],
+  premium: ["Diseño y desarrollo personalizado", "Reservas, flujos e integraciones según el proyecto", "Soporte, acompañamiento y actualizaciones"],
 };
+
+const AI_COVERS: Record<AiTierId, string> = {
+  lite: "Jeipy AI Lite (complemento opcional): responde preguntas frecuentes, explica tus servicios, orienta y capta datos básicos",
+  pro: "Jeipy AI Pro (se contrata aparte): diagnostica necesidades, recomienda, clasifica clientes potenciales y agenda cuando aplique",
+  custom: "Jeipy AI Custom (se contrata aparte): integraciones, CRM y flujos diseñados para tu operación",
+};
+
+/** Nota de costos de Jeipy AI: configuración inicial + operación mensual, sin inventar la mensualidad. */
+export function aiCostNote(id: AiTierId): string {
+  const tier = getAiTier(id);
+  if (id === "custom") {
+    return `${tier.name} va aparte del plan web: desde ${tier.setup.price} ${tier.setup.currency}, y puede aumentar según complejidad e integraciones. Ajustes y mantenimiento según alcance y contrato.`;
+  }
+  return `${tier.name} va aparte del plan web: configuración inicial desde ${tier.setup.price} ${tier.setup.currency} (pago único) + operación mensual según nivel de uso. ${tier.maintenance.value}.`;
+}
 
 export function recommendPlan(profile: Profile, cap?: PlanId): Recommendation {
   const tier = pickTier(profile, cap);
@@ -122,6 +143,8 @@ export function recommendPlan(profile: Profile, cap?: PlanId): Recommendation {
   const business = isKnownBusiness(profile.businessType) ? `tu ${profile.businessType}` : "tu negocio";
   const pNeeds = premiumNeeds(profile);
   const eNeeds = esencialNeeds(profile);
+  const aiTier = pickAiTier(profile, tier);
+  const aiName = aiTier ? getAiTier(aiTier).name : "";
   let verdict: string;
   let alternative: string;
 
@@ -129,28 +152,31 @@ export function recommendPlan(profile: Profile, cap?: PlanId): Recommendation {
     case "premium":
       verdict =
         profile.features.ai && profile.aiLevel === "advanced"
-          ? `Aquí ya necesitas automatización más profunda, no solo atención básica. **Premium** tiene más sentido porque permite ${joinNatural(
-              [profile.features.booking && "integrar reservas", "flujos personalizados", "una versión más avanzada de Jeipy AI"].filter(Boolean) as string[],
+          ? `Aquí ya necesitas automatización más profunda, no solo atención básica. **Premium** con **${aiName}** tiene más sentido porque permite ${joinNatural(
+              [profile.features.booking && "integrar reservas", "flujos personalizados", aiTier === "custom" ? "automatización diseñada para tu operación" : "un asistente comercial más completo"].filter(Boolean) as string[],
             )}.`
-          : `Te recomiendo **Premium** porque necesitas ${joinNatural(pNeeds)}, algo que requiere desarrollo y flujos personalizados.`;
-      alternative =
-        "Si por ahora te basta con que la IA responda dudas y capte datos, sin reservas ni procesos automatizados, Esencial + Jeipy AI sería suficiente con una inversión menor.";
+          : `Te recomiendo **Premium** porque necesitas ${joinNatural(pNeeds)}, algo que requiere desarrollo y flujos personalizados.${
+              aiTier ? ` Para la parte de IA, **${aiName}** es el complemento indicado.` : ""
+            }`;
+      alternative = aiTier
+        ? "Si por ahora te basta con que la IA responda dudas y capte datos, sin reservas ni procesos automatizados, Esencial + Jeipy AI Lite sería suficiente con una inversión menor."
+        : "Si más adelante quieres que un asistente atienda y clasifique a tus clientes, Premium es compatible con Jeipy AI Pro. Y si no necesitas reservas ni integraciones, Esencial sería suficiente.";
       break;
     case "esencial-ai":
       verdict = `Por lo que me cuentas, **Esencial** cubre bien la parte de ${joinNatural(
         eNeeds.length ? eNeeds : ["presencia digital"],
-      )}. Como también quieres automatizar preguntas frecuentes, **Jeipy AI** puede añadirse como complemento sin necesidad de pasar todavía a Premium.`;
+      )}. Como también quieres automatizar preguntas frecuentes, **Jeipy AI Lite** puede añadirse como complemento sin necesidad de pasar todavía a Premium.`;
       alternative =
         cap === "esencial"
           ? "Lo que quedaría para más adelante son las reservas, integraciones y automatizaciones avanzadas de Premium."
-          : "Si más adelante quieres que la IA gestione reservas, cotizaciones o clasifique clientes, ahí sí tendría sentido Premium.";
+          : "Si más adelante quieres que la IA gestione reservas, cotizaciones o clasifique clientes, ahí sí tendría sentido Premium con Jeipy AI Pro.";
       break;
     case "esencial":
       verdict = `Te recomiendo **Esencial** porque necesitas ${joinNatural(eNeeds.length ? eNeeds : ["una presencia más completa"])}.`;
       alternative =
         cap === "esencial"
           ? "Lo que quedaría para más adelante son las reservas, integraciones y automatizaciones de Premium."
-          : "Si además quieres automatizar reservas o procesos más complejos, Premium sería la mejor opción. Y si quieres que una IA responda preguntas frecuentes, puedes sumar Jeipy AI sin cambiar de plan.";
+          : "Si además quieres automatizar reservas o procesos más complejos, Premium sería la mejor opción. Y si quieres que una IA responda preguntas frecuentes, puedes sumar Jeipy AI Lite sin cambiar de plan.";
       break;
     default:
       verdict = `Te recomiendo **Básico**: lo que necesitas es una presencia digital clara y profesional para ${business}.`;
@@ -162,10 +188,7 @@ export function recommendPlan(profile: Profile, cap?: PlanId): Recommendation {
 
   const notes: string[] = [];
   let needsHuman = false;
-  if (tier === "esencial-ai") notes.push("Jeipy AI se cotiza aparte del precio base del Esencial.");
-  if (tier === "esencial-ai" || tier === "premium") {
-    notes.push("Jeipy AI puede requerir configuración inicial y una mensualidad según uso, complejidad e integraciones.");
-  }
+  if (aiTier) notes.push(aiCostNote(aiTier));
   if (profile.budget && profile.budget !== "skipped") {
     const budget = profile.budget.amount;
     const entry = planPriceValue(getPlan("basico"));
@@ -183,9 +206,9 @@ export function recommendPlan(profile: Profile, cap?: PlanId): Recommendation {
   return {
     type: "recommendation",
     planId,
-    withAiAddon: tier === "esencial-ai",
+    aiTier,
     because: becauseList(profile, tier),
-    covers: COVERS[tier],
+    covers: aiTier ? [...WEB_COVERS[tier], AI_COVERS[aiTier]] : WEB_COVERS[tier],
     alternative,
     notes,
     verdict,

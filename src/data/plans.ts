@@ -5,11 +5,12 @@
 
 /** Cómo se relaciona cada plan con Jeipy AI. */
 export type PlanAi =
-  | { mode: "none"; tag: string }
-  | { mode: "addon"; tag: string; description: string; note: string }
+  | { mode: "none"; note: string }
+  | { mode: "addon"; tag: string; tier: string; description: string; note: string }
   | {
       mode: "featured";
       tag: string;
+      tier: string;
       headline: string;
       /** Capacidades agrupadas por el resultado de negocio que producen. */
       groups: { label: string; items: string[] }[];
@@ -34,7 +35,7 @@ export const jeipyAi = {
   name: "Jeipy AI",
   tagline: "Asistente inteligente para tu negocio",
   costNote:
-    "Jeipy AI puede requerir configuración inicial y una mensualidad según uso, complejidad e integraciones.",
+    "Jeipy AI se contrata aparte del plan web: una configuración inicial de pago único y una operación mensual según el nivel de uso.",
 } as const;
 
 export const plans: Plan[] = [
@@ -53,7 +54,7 @@ export const plans: Plan[] = [
       "Estructura visual profesional",
       "Optimización básica de rendimiento",
     ],
-    ai: { mode: "none", tag: "No incluido" },
+    ai: { mode: "none", note: "Ideal para comenzar tu presencia digital." },
     cta: { label: "Empezar con Básico", intent: "start", message: "Hola Jeipy, me interesa el plan Básico." },
   },
   {
@@ -74,9 +75,10 @@ export const plans: Plan[] = [
     ],
     ai: {
       mode: "addon",
-      tag: "Opcional",
-      description: "Responde preguntas frecuentes, orienta visitantes y convierte consultas en contactos.",
-      note: "Se cotiza aparte del precio base.",
+      tag: "Jeipy AI Lite disponible",
+      tier: "Jeipy AI Lite",
+      description: "Responde preguntas frecuentes, orienta a tus visitantes y convierte consultas en contactos.",
+      note: "Complemento opcional · configuración desde $200.000 + operación mensual.",
     },
     cta: { label: "Elegir Esencial", intent: "choose", message: "Hola Jeipy, me interesa el plan Esencial." },
     highlight: "Más popular",
@@ -101,14 +103,15 @@ export const plans: Plan[] = [
     ],
     ai: {
       mode: "featured",
-      tag: "Según alcance",
+      tag: "Compatible con Jeipy AI Pro",
+      tier: "Jeipy AI Pro",
       headline: "Responde dudas, orienta clientes y captura oportunidades mientras tú atiendes tu negocio.",
       groups: [
         { label: "Atiende", items: ["Preguntas frecuentes", "Productos y servicios", "Recomendaciones"] },
         { label: "Capta", items: ["Captación de leads", "Formularios conversacionales", "Clasificación de clientes"] },
         { label: "Conecta", items: ["Paso a WhatsApp", "Reservas o agendamiento", "Automatizaciones a medida"] },
       ],
-      note: "Automatizaciones avanzadas e integraciones externas según el alcance del proyecto.",
+      note: "Se contrata aparte · configuración desde $350.000 + operación mensual según uso.",
     },
     cta: { label: "Hablar sobre Premium", intent: "talk", message: "Hola Jeipy, quiero hablar sobre el plan Premium." },
   },

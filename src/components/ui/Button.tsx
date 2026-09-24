@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { MouseEventHandler, ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { isExternalHref } from "@/lib/contact";
 import { ArrowIcon } from "@/components/icons/ArrowIcon";
@@ -16,7 +16,7 @@ type ButtonLinkProps = {
   /** Halo azul y destello al hover: reservado para el CTA principal de una pantalla. */
   glow?: boolean;
   className?: string;
-  onClick?: () => void;
+  onClick?: MouseEventHandler<HTMLAnchorElement>;
   "aria-label"?: string;
 };
 

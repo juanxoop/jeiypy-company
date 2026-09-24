@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { assistantConfig } from "@/config/assistant";
 import { cn } from "@/lib/cn";
+import { OPEN_ASSISTANT_EVENT, type OpenAssistantDetail } from "../open";
 import { AssistantOrb } from "./AssistantOrb";
 
 /** El panel (conversación + motor) se descarga solo cuando el visitante muestra interés. */
@@ -16,7 +17,20 @@ const AssistantPanel = dynamic(loadPanel, { ssr: false });
  */
 export function AssistantLauncher() {
   const [open, setOpen] = useState(false);
+  const [request, setRequest] = useState<{ id: number; message: string }>();
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const clearRequest = useCallback(() => setRequest(undefined), []);
+
+  // Otros CTA del sitio pueden abrir el asistente con un primer mensaje.
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const { message } = (event as CustomEvent<OpenAssistantDetail>).detail ?? {};
+      if (message) setRequest({ id: Date.now(), message });
+      setOpen(true);
+    };
+    window.addEventListener(OPEN_ASSISTANT_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_ASSISTANT_EVENT, onOpen);
+  }, []);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -90,7 +104,7 @@ export function AssistantLauncher() {
         </button>
       </div>
 
-      <AnimatePresence>{open && <AssistantPanel onClose={close} />}</AnimatePresence>
+      <AnimatePresence>{open && <AssistantPanel onClose={close} request={request} onRequestHandled={clearRequest} />}</AnimatePresence>
     </>
   );
 }

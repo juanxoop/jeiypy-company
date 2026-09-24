@@ -4,7 +4,7 @@ import { ArrowIcon } from "@/components/icons/ArrowIcon";
 import { CheckIcon, ChannelIcon } from "@/components/icons/BrandIcons";
 import { isWhatsAppConfigured, getContactHref } from "@/lib/contact";
 import { cn } from "@/lib/cn";
-import { getPlan } from "../knowledge";
+import { getAiTier, getPlan } from "../knowledge";
 import type { HandoffAction, MessageBlock } from "../types";
 import { InlineBold, RichText } from "./RichText";
 
@@ -75,6 +75,7 @@ function RecommendationCard({
   actions: BlockActions;
 }) {
   const plan = getPlan(block.planId);
+  const aiTier = block.aiTier ? getAiTier(block.aiTier) : undefined;
   return (
     <div className="jp-gradient-border relative overflow-hidden rounded-2xl bg-[linear-gradient(165deg,#0e1a33,#0a1224_55%,#080b12)] p-4">
       <div aria-hidden className="absolute -top-10 -right-10 size-28 rounded-full bg-jeipy/25 blur-2xl" />
@@ -83,11 +84,11 @@ function RecommendationCard({
         <p className="mt-2 flex flex-wrap items-baseline gap-x-2">
           <span className="text-lg font-semibold tracking-[-0.02em] text-snow">
             Plan {plan.name}
-            {block.withAiAddon && <span className="text-glow"> + Jeipy AI</span>}
+            {aiTier && <span className="text-glow"> + {aiTier.name}</span>}
           </span>
           <span className="text-[13px] text-mist">
-            desde {plan.price} {plan.currency}
-            {block.withAiAddon && " · IA opcional, se cotiza aparte"}
+            web desde {plan.price} {plan.currency}
+            {aiTier && ` · IA aparte, desde ${aiTier.setup.price} + mensualidad`}
           </span>
         </p>
 

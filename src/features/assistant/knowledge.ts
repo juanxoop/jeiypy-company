@@ -5,11 +5,14 @@
  * Todo lo que no esté aquí, el asistente debe reconocer que no lo sabe.
  */
 import { siteConfig } from "@/config/site";
+import { getAiTier, jeipyAiOffer, jeipyAiTiers } from "@/data/jeipyAi";
 import { jeipyAi, plans, type Plan } from "@/data/plans";
 import { processSteps } from "@/data/process";
 import { services } from "@/data/services";
 import { pricingContent } from "@/data/home";
-import type { PlanId } from "./types";
+import type { AiTierId, PlanId } from "./types";
+
+export { getAiTier };
 
 export const company = {
   name: siteConfig.name,
@@ -25,6 +28,8 @@ export const knowledge = {
   plans,
   process: processSteps,
   jeipyAi,
+  aiOffer: jeipyAiOffer,
+  aiTiers: jeipyAiTiers,
   priceNote: pricingContent.notes[0],
 } as const;
 
@@ -43,16 +48,24 @@ export function formatCop(amount: number): string {
   return `$${amount.toLocaleString("es-CO")} COP`;
 }
 
-/** Cómo aparece Jeipy AI en cada plan, en una frase. */
+/** Cómo se relaciona cada plan con Jeipy AI, en una frase. La IA nunca va incluida en el precio del plan. */
 export function aiAvailability(plan: Plan): string {
   switch (plan.ai.mode) {
     case "none":
-      return "no incluye Jeipy AI";
+      return "no incluye Jeipy AI: es ideal para comenzar tu presencia digital";
     case "addon":
-      return "Jeipy AI está disponible como mejora opcional, cotizada aparte";
+      return `es compatible con ${aiTierPriceLine("lite")}, como complemento opcional`;
     case "featured":
-      return "Jeipy AI forma parte de la propuesta, con alcance según el proyecto";
+      return `es compatible con ${aiTierPriceLine("pro")}, que se contrata aparte`;
   }
+}
+
+/** "Jeipy AI Lite (configuración inicial desde $200.000, pago único, + operación mensual según uso)". */
+export function aiTierPriceLine(id: AiTierId): string {
+  const tier = getAiTier(id);
+  return id === "custom"
+    ? `${tier.name} (desde ${tier.setup.price}, según alcance)`
+    : `${tier.name} (configuración inicial desde ${tier.setup.price}, pago único, + operación mensual según uso)`;
 }
 
 /**
@@ -64,7 +77,6 @@ export const unknownTopics = {
   payment: "las formas de pago",
   hosting: "el dominio y el hosting",
   ecommerce: "las tiendas online con pagos en línea",
-  maintenance: "los costos de mantenimiento mensual",
 } as const;
 
 export type UnknownTopic = keyof typeof unknownTopics;

@@ -11,9 +11,12 @@ import { MessageBlocks, type BlockActions } from "./MessageBlocks";
 
 type AssistantPanelProps = {
   onClose: () => void;
+  /** Mensaje enviado desde un CTA externo; se envía una sola vez por id. */
+  request?: { id: number; message: string };
+  onRequestHandled?: () => void;
 };
 
-export function AssistantPanel({ onClose }: AssistantPanelProps) {
+export function AssistantPanel({ onClose, request, onRequestHandled }: AssistantPanelProps) {
   const assistant = useAssistant();
   const { messages, quickReplies, status, conversation } = assistant;
   const [draft, setDraft] = useState("");
@@ -25,6 +28,15 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
   }, []);
+
+  const handledRequest = useRef<number>(undefined);
+  const { send: sendMessage } = assistant;
+  useEffect(() => {
+    if (!request || thinking || handledRequest.current === request.id) return;
+    handledRequest.current = request.id;
+    void sendMessage(request.message);
+    onRequestHandled?.();
+  }, [request, thinking, sendMessage, onRequestHandled]);
 
   // Mantener visible lo último de la conversación.
   useEffect(() => {

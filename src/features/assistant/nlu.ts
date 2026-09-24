@@ -3,7 +3,7 @@
  * y extrae datos del perfil a partir de lenguaje libre en español.
  */
 import type { UnknownTopic } from "./knowledge";
-import type { AiLevel, Budget, Feature, FeatureMap, Goal, PlanId, Profile, WebsiteStatus } from "./types";
+import type { AiLevel, AiTierId, Budget, Feature, FeatureMap, Goal, PlanId, Profile, WebsiteStatus } from "./types";
 
 export function normalize(text: string): string {
   return ` ${text
@@ -42,6 +42,10 @@ export type Intent =
   | { type: "think-later" }
   | { type: "guarantee" }
   | { type: "ai-info" }
+  | { type: "ai-pricing" }
+  | { type: "ai-monthly" }
+  /** Un nivel concreto de Jeipy AI; `wants`: lo quiere (CTA), no solo pregunta por él. */
+  | { type: "ai-tier"; tier: AiTierId; wants: boolean }
   | { type: "plan-info"; planId: PlanId }
   | { type: "compare" }
   | { type: "prices" }
@@ -54,6 +58,20 @@ export type Intent =
   | { type: "restart" };
 
 const PLAN_WORDS: Record<PlanId, string> = { basico: " basico", esencial: " esencial", premium: " premium" };
+
+/** Intenciones que nunca son el nombre de un negocio ("me parece caro", "¿y la mensualidad?"). */
+const CONVERSATIONAL_INTENTS = new Set<string>([
+  "human", "lead", "objection-price", "think-later", "guarantee", "unsure", "which-best",
+  "ai-monthly", "ai-pricing", "ai-tier", "prices", "compare", "thanks", "restart",
+]);
+
+/** "Jeipy AI Lite" → "lite". Pro solo cuenta junto a "ai"/"ia"/"jeipy" para no confundirlo con otras palabras. */
+export function extractAiTier(t: string): AiTierId | undefined {
+  if (has(t, " lite ")) return "lite";
+  if (has(t, " ai pro", " ia pro", " jeipy pro", " version pro", " nivel pro")) return "pro";
+  if (has(t, " ai custom", " ia custom", " jeipy custom", " custom ")) return "custom";
+  return undefined;
+}
 
 /** Detecta la intención principal. El orden define la prioridad. */
 export function detectIntent(raw: string): Intent | null {
@@ -70,6 +88,16 @@ export function detectIntent(raw: string): Intent | null {
   }
   if (has(t, " dejar mis datos", " dejo mis datos", " que me contacten", " contactenme", " me pueden contactar", " llamenme", " escribanme"))
     return { type: "lead" };
+  // Mensualidad de Jeipy AI: nunca se inventa un valor.
+  if (has(t, " mensualidad", " mensual", " al mes", " cada mes", " por mes", " mantenimiento")) return { type: "ai-monthly" };
+
+  // Niveles de Jeipy AI (Lite, Pro, Custom).
+  const tier = extractAiTier(t);
+  if (tier) {
+    const wants = has(t, " quiero", " agregar", " anadir", " sumar", " consultar", " me interesa", " contratar", " automatizar mi negocio");
+    return { type: "ai-tier", tier, wants };
+  }
+
   if (has(t, " quiero avanzar", " quiero contratar", " quiero empezar", " quiero arrancar", " empecemos", " vamos con", " lo quiero", " me lo llevo", " quiero ese plan"))
     return { type: "advance" };
 
@@ -88,11 +116,14 @@ export function detectIntent(raw: string): Intent | null {
   if (has(t, " que incluye cada", " que incluyen los planes", " que trae cada plan", " que tiene cada plan", " que ofrece cada plan"))
     return { type: "plans-overview" };
   if (has(t, " quiero automatizar", " automatizar mi negocio", " automatizar el negocio", " automatizar mi empresa")) return { type: "automate" };
+  if (has(t, " continuar el diagnostico", " seguir con el diagnostico", " estimar mi caso")) return { type: "recommend" };
   if (has(t, " que plan", " cual plan", " me conviene", " recomiend", " cual me sirve", " cual elijo", " ayudame a elegir", " que me sirve"))
     return { type: "recommend" };
   if (has(t, " digitaliz", " tengo un negocio", " tengo una empresa", " tengo un emprendimiento")) return { type: "digitalize" };
-  if (has(t, " jeipy ai", " asistente", " inteligencia artificial", " ia ", " chatbot", " bot ", " automatiz"))
-    return { type: "ai-info" };
+  const aboutAi = has(t, " jeipy ai", " asistente", " inteligencia artificial", " ia ", " chatbot", " bot ", " automatiz");
+  if ((aboutAi && has(t, " precio", " cuesta", " cuanto", " costo", " valor", " vale", " cobran")) || has(t, " niveles de jeipy", " niveles de ia"))
+    return { type: "ai-pricing" };
+  if (aboutAi) return { type: "ai-info" };
 
   const mentioned = (Object.keys(PLAN_WORDS) as PlanId[]).filter((id) => t.includes(PLAN_WORDS[id]));
   if (mentioned.length > 1 || has(t, " diferencia", " comparar", " compara", " versus", " vs ")) return { type: "compare" };
@@ -103,7 +134,6 @@ export function detectIntent(raw: string): Intent | null {
   if (has(t, " dominio", " hosting", " hospedaje", " servidor")) return { type: "unknown-topic", topic: "hosting" };
   if (has(t, " tienda online", " tiendas online", " tienda virtual", " tiendas virtuales", " ecommerce", " e-commerce", " carrito", " pagos en linea", " pagos online", " con pagos", " pasarela"))
     return { type: "unknown-topic", topic: "ecommerce" };
-  if (has(t, " mantenimiento", " mensualidad")) return { type: "unknown-topic", topic: "maintenance" };
 
   if (has(t, " precio", " cuesta", " cuanto vale", " costo", " tarifa", " valor", " planes")) return { type: "prices" };
   if (has(t, " servicio", " que hacen", " que ofrecen", " a que se dedican")) return { type: "services" };
@@ -189,7 +219,9 @@ export function extractBusinessType(raw: string, { loose = false } = {}): string
   if (match && !/(negocio|empresa|emprendimiento|pagina|web)$/.test(match[1].trim())) return match[1].trim();
 
   // Respuesta directa a "¿qué tipo de negocio tienes?": solo si no es una pregunta ni otra respuesta.
-  const looksLikeOtherAnswer = /^ (quiero|verme|conseguir|mostrar|automatizar|vender|tener|mas|solo) /.test(t);
+  const looksLikeOtherAnswer =
+    /^ (quiero|verme|conseguir|mostrar|automatizar|vender|tener|mas|solo) /.test(t) ||
+    CONVERSATIONAL_INTENTS.has(detectIntent(raw)?.type ?? "");
   if (loose && !isQuestion(raw) && !parseYesNo(raw) && !extractWebsite(raw) && !looksLikeOtherAnswer) {
     const answer = t.trim().replace(/^(es |soy |tengo )?(un |una |el |la )?/, "");
     if (answer.length >= 3 && answer.split(" ").length <= 5) return answer;

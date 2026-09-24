@@ -1,6 +1,7 @@
 import { AssistantOrb } from "@/features/assistant/components/AssistantOrb";
 import { Reveal, RevealGroup, RevealItem } from "@/components/motion/Reveal";
 import { Container } from "@/components/ui/Container";
+import { JeipyAiOffer } from "@/components/ui/JeipyAiOffer";
 import { PlanCard } from "@/components/ui/PlanCard";
 import { Section } from "@/components/ui/Section";
 import { SectionHeading } from "@/components/ui/SectionHeading";
@@ -48,6 +49,8 @@ export function Pricing() {
             </li>
           </ul>
         </Reveal>
+
+        <JeipyAiOffer />
       </Container>
     </Section>
   );

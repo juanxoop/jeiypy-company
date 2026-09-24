@@ -13,7 +13,7 @@
  */
 import { assistantConfig } from "@/config/assistant";
 import { isWhatsAppConfigured } from "@/lib/contact";
-import { aiAvailability, company, formatCop, getPlan, knowledge, unknownTopics, type UnknownTopic } from "./knowledge";
+import { aiAvailability, aiTierPriceLine, company, formatCop, getAiTier, getPlan, knowledge, unknownTopics, type UnknownTopic } from "./knowledge";
 import {
   declines,
   detectIntent,
@@ -32,8 +32,9 @@ import {
   parseYesNo,
   type Intent,
 } from "./nlu";
-import { lowerPlan, needsAiLevelQuestion, recommendPlan } from "./recommend";
+import { aiCostNote, lowerPlan, needsAiLevelQuestion, recommendPlan } from "./recommend";
 import type {
+  AiTierId,
   AssistantBrain,
   AssistantTurn,
   ConversationState,
@@ -123,7 +124,11 @@ function question(slot: Slot, profile: Profile): { blocks: MessageBlock[]; quick
       };
     case "aiLevel":
       return {
-        blocks: [text("¿Quieres que la IA solo responda dudas y capture información, o también que automatice reservas, cotizaciones o procesos?")],
+        blocks: [
+          text(
+            "¿Quieres que la IA solo responda dudas y capture información (Jeipy AI Lite), o también que automatice reservas, cotizaciones o procesos (Jeipy AI Pro)?",
+          ),
+        ],
         quickReplies: ["Solo responder dudas y captar datos", "También automatizar procesos"],
       };
     case "name":
@@ -244,7 +249,7 @@ function fillSlot(slot: Slot, input: string, state: ConversationState): Filled |
       if (value === "advanced") profile.features.automation = true;
       return next(
         value === "basic"
-          ? "Perfecto, entonces una IA ligera es suficiente: responder, orientar y captar datos."
+          ? "Perfecto, entonces Jeipy AI Lite es suficiente: responder, orientar y captar datos."
           : "Entendido: necesitas automatización más profunda, no solo atención básica.",
       );
     }
@@ -289,12 +294,18 @@ const FEATURE_LABEL: Record<Feature, string> = {
   automation: "automatización de procesos",
 };
 
-const aiInterestLabel = (profile: Profile) =>
-  !profile.features.ai ? "No por ahora" : profile.aiLevel === "advanced" ? "Sí, avanzada (automatización)" : "Sí, básica (dudas y datos)";
+const aiInterestLabel = (profile: Profile, aiTier?: AiTierId) =>
+  !profile.features.ai
+    ? "No por ahora"
+    : aiTier
+      ? `Sí, ${getAiTier(aiTier).name}`
+      : profile.aiLevel === "advanced"
+        ? "Sí, avanzada (automatización)"
+        : "Sí, básica (dudas y datos)";
 
 const wantedFeatures = (profile: Profile) => (Object.keys(profile.features) as Feature[]).filter((f) => profile.features[f]);
 
-function summaryRows(profile: Profile, planId?: PlanId) {
+function summaryRows(profile: Profile, planId?: PlanId, aiTier?: AiTierId) {
   const rows: { label: string; value: string }[] = [];
   if (profile.name) rows.push({ label: "Nombre", value: profile.name });
   if (profile.businessType) rows.push({ label: "Negocio", value: capitalize(profile.businessType) });
@@ -302,21 +313,31 @@ function summaryRows(profile: Profile, planId?: PlanId) {
   if (profile.goal) rows.push({ label: "Objetivo", value: GOAL_LABEL[profile.goal] });
   const wanted = wantedFeatures(profile).filter((f) => f !== "ai");
   if (wanted.length) rows.push({ label: "Necesita", value: capitalize(wanted.map((f) => FEATURE_LABEL[f]).join(", ")) });
-  if (profile.features.ai !== undefined) rows.push({ label: "Interés en IA", value: aiInterestLabel(profile) });
+  if (profile.features.ai !== undefined) rows.push({ label: "Interés en IA", value: aiInterestLabel(profile, aiTier) });
   if (profile.budget) rows.push({ label: "Presupuesto", value: profile.budget === "skipped" ? "Sin definir" : formatCop(profile.budget.amount) });
   if (planId) rows.push({ label: "Plan orientativo", value: `${getPlan(planId).name} (desde ${getPlan(planId).price})` });
+  if (aiTier) {
+    const tier = getAiTier(aiTier);
+    rows.push({ label: "Jeipy AI", value: `${tier.name} (configuración desde ${tier.setup.price} + mensualidad según uso)` });
+  }
   if (profile.contact) rows.push({ label: "Contacto", value: profile.contact });
   return rows;
 }
 
 /** "Lead: barbería / necesita reservas + catálogo / interés en IA / presupuesto aproximado $X". */
-export function leadSummary(profile: Profile, planId?: PlanId): string {
+export function leadSummary(profile: Profile, planId?: PlanId, aiTier?: AiTierId): string {
   const parts = [`Lead: ${profile.businessType ?? "negocio sin especificar"}`];
   const needs = wantedFeatures(profile).filter((f) => f !== "ai").map((f) => FEATURE_LABEL[f]);
   if (profile.goal) needs.unshift(GOAL_LABEL[profile.goal].toLowerCase());
   if (needs.length) parts.push(`necesita ${needs.join(" + ")}`);
   parts.push(
-    !profile.features.ai ? "sin interés en IA por ahora" : profile.aiLevel === "advanced" ? "interés en IA avanzada" : "interés en IA básica",
+    !profile.features.ai
+      ? "sin interés en IA por ahora"
+      : aiTier
+        ? `interés en ${getAiTier(aiTier).name}`
+        : profile.aiLevel === "advanced"
+          ? "interés en IA avanzada"
+          : "interés en IA básica",
   );
   if (profile.budget && profile.budget !== "skipped") parts.push(`presupuesto aproximado ${formatCop(profile.budget.amount)}`);
   if (planId) parts.push(`plan orientativo ${getPlan(planId).name}`);
@@ -324,8 +345,8 @@ export function leadSummary(profile: Profile, planId?: PlanId): string {
 }
 
 /** Mensaje prellenado para WhatsApp con el contexto de la conversación. */
-export function buildWhatsAppMessage(profile: Profile, planId?: PlanId): string {
-  const rows = summaryRows(profile, planId);
+export function buildWhatsAppMessage(profile: Profile, planId?: PlanId, aiTier?: AiTierId): string {
+  const rows = summaryRows(profile, planId, aiTier);
   if (!rows.length) return "Hola Jeipy, vengo del asistente de la web y quiero hablar con una persona.";
   return ["Hola Jeipy, vengo del asistente de la web.", ...rows.map((r) => `${r.label}: ${r.value}`)].join("\n");
 }
@@ -334,7 +355,7 @@ function handoffBlock(state: ConversationState): MessageBlock {
   const actions: HandoffAction[] = [];
   if (!state.leadCaptured) actions.push("lead");
   actions.push(isWhatsAppConfigured() ? "whatsapp" : "contact-section");
-  return { type: "handoff", actions, whatsappMessage: buildWhatsAppMessage(state.profile, state.recommended) };
+  return { type: "handoff", actions, whatsappMessage: buildWhatsAppMessage(state.profile, state.recommended, state.recommendedAi) };
 }
 
 function captureLead(state: ConversationState, lead: MessageBlock[] = []): Reply {
@@ -352,15 +373,16 @@ function captureLead(state: ConversationState, lead: MessageBlock[] = []): Reply
   const record: Lead = {
     name: profile.name ?? "Sin nombre",
     contact: profile.contact,
-    summary: leadSummary(profile, state.recommended),
+    summary: leadSummary(profile, state.recommended, state.recommendedAi),
     profile,
     plan: state.recommended,
+    aiTier: state.recommendedAi,
   };
   return {
     blocks: [
       ...lead,
       text(`Listo${profile.name ? `, ${profile.name.split(" ")[0]}` : ""}. Este es el resumen que recibirá el equipo para preparar tu propuesta:`),
-      { type: "summary", title: "Resumen de tu solicitud", rows: summaryRows(profile, state.recommended) },
+      { type: "summary", title: "Resumen de tu solicitud", rows: summaryRows(profile, state.recommended, state.recommendedAi) },
       ...(assistantConfig.prototype
         ? [text("**Modo prototipo:** por ahora estos datos se guardan solo en este navegador y no llegan al equipo.")]
         : []),
@@ -379,7 +401,13 @@ function captureLead(state: ConversationState, lead: MessageBlock[] = []): Reply
 
 function recommend(state: ConversationState, lead: MessageBlock[] = [], cap?: PlanId): Reply {
   const { needsHuman, verdict, ...recommendation } = recommendPlan(state.profile, cap);
-  const next: ConversationState = { ...state, expecting: null, recommended: recommendation.planId, retries: 0 };
+  const next: ConversationState = {
+    ...state,
+    expecting: null,
+    recommended: recommendation.planId,
+    recommendedAi: recommendation.aiTier,
+    retries: 0,
+  };
   const blocks: MessageBlock[] = [...lead, text(verdict), recommendation];
 
   if (needsHuman) {
@@ -429,7 +457,7 @@ function plansOverview(): MessageBlock[] {
       items: knowledge.plans.map((p) => `**${p.name}** (desde ${p.price}): ${p.features.slice(0, 5).map(lowerFirst).join(", ")}.`),
     },
     text(
-      "Jeipy AI se suma desde Esencial como una opción ligera (responder dudas y captar datos), y en Premium va integrado con automatización más avanzada. Para decirte cuál encaja contigo, cuéntame un poco de tu negocio.",
+      "Jeipy AI no viene incluido en ningún plan: es un complemento que se contrata aparte. Básico no lleva IA; Esencial es compatible con **Jeipy AI Lite** (responder dudas y captar datos) y Premium con **Jeipy AI Pro** (un asistente comercial más completo). Para decirte cuál encaja contigo, cuéntame un poco de tu negocio.",
     ),
   ];
 }
@@ -444,7 +472,8 @@ function planInfo(planId: PlanId, state: ConversationState): Reply {
     blocks: [
       text(`**${plan.name}**, desde ${plan.price} ${plan.currency}. ${plan.summary}`),
       { type: "list", items: plan.features },
-      text(`${capitalize(aiAvailability(plan))}. ${knowledge.priceNote}`),
+      text(`${plan.name} ${aiAvailability(plan)}. ${knowledge.priceNote}`),
+      ...(state.recommended === planId && state.recommendedAi ? [text(aiCostNote(state.recommendedAi))] : []),
     ],
     quickReplies: state.recommended === planId ? ["Quiero avanzar", "Comparar planes"] : ["¿Me conviene este plan?", "Comparar planes"],
     state,
@@ -498,6 +527,36 @@ function priceObjection(state: ConversationState): Reply {
   };
 }
 
+/** Los tres conceptos de precio: plan web, configuración de la IA y operación mensual. */
+function priceConcepts(): MessageBlock {
+  const { setup, operation } = knowledge.aiOffer.pricing;
+  return {
+    type: "list",
+    items: [
+      "**Plan web:** el precio de tu página (Básico, Esencial o Premium).",
+      `**${setup.title} de Jeipy AI:** ${lowerFirst(setup.text)}`,
+      `**${operation.title}:** ${lowerFirst(operation.text)}`,
+    ],
+  };
+}
+
+function aiTierInfo(id: AiTierId, state: ConversationState): Reply {
+  const tier = getAiTier(id);
+  const price =
+    id === "custom"
+      ? `Desde ${tier.setup.price} ${tier.setup.currency}. ${tier.setup.note} Ajustes y mantenimiento: ${lowerFirst(tier.maintenance.value)}.`
+      : `Configuración inicial desde ${tier.setup.price} ${tier.setup.currency} (pago único) + operación mensual según nivel de uso. ${tier.maintenance.value}.`;
+  return {
+    blocks: [
+      text(`**${tier.name}:** ${lowerFirst(tier.audience)} ${tier.pairsWith}.`),
+      { type: "list", items: tier.features },
+      text(`${price} Se suma al precio del plan web, no lo reemplaza.`),
+    ],
+    quickReplies: [`Quiero ${tier.name}`, "¿Cuánto es la mensualidad?", "¿Qué plan me conviene?"],
+    state,
+  };
+}
+
 function answerIntent(intent: Intent, state: ConversationState): Reply | null {
   switch (intent.type) {
     case "about":
@@ -512,9 +571,11 @@ function answerIntent(intent: Intent, state: ConversationState): Reply | null {
       return {
         blocks: [
           { type: "list", items: knowledge.plans.map((p) => `**${p.name}:** desde ${p.price} ${p.currency}`) },
-          text(`Son precios orientativos: ${knowledge.priceNote.charAt(0).toLowerCase()}${knowledge.priceNote.slice(1)} ¿Vemos cuál aplica a tu caso?`),
+          text(
+            `Son precios orientativos: ${knowledge.priceNote.charAt(0).toLowerCase()}${knowledge.priceNote.slice(1)} Si además quieres Jeipy AI, se contrata aparte con su propia configuración inicial y una mensualidad según uso. ¿Vemos cuál aplica a tu caso?`,
+          ),
         ],
-        quickReplies: ["¿Qué plan me conviene?", "¿Qué diferencia hay entre planes?"],
+        quickReplies: ["¿Qué plan me conviene?", "¿Cuánto cuesta Jeipy AI?", "¿Qué diferencia hay entre planes?"],
         state,
       };
     case "compare":
@@ -523,9 +584,9 @@ function answerIntent(intent: Intent, state: ConversationState): Reply | null {
           {
             type: "list",
             items: [
-              `**Básico** (desde ${getPlan("basico").price}): presencia profesional sencilla.`,
-              `**Esencial** (desde ${getPlan("esencial").price}): web completa para captar clientes, con catálogo y formularios. Jeipy AI opcional.`,
-              `**Premium** (desde ${getPlan("premium").price}): solución personalizada con reservas, integraciones y automatización con Jeipy AI.`,
+              `**Básico** (desde ${getPlan("basico").price}): presencia profesional sencilla, sin IA.`,
+              `**Esencial** (desde ${getPlan("esencial").price}): web completa para captar clientes, con catálogo y formularios. Compatible con Jeipy AI Lite como complemento opcional.`,
+              `**Premium** (desde ${getPlan("premium").price}): solución personalizada con reservas, integraciones y flujos a medida. Compatible con Jeipy AI Pro, que se contrata aparte.`,
             ],
           },
           text("La diferencia está en lo que necesitas lograr. Si me cuentas un poco de tu negocio, te digo cuál tiene más sentido."),
@@ -545,23 +606,49 @@ function answerIntent(intent: Intent, state: ConversationState): Reply | null {
       return {
         blocks: [
           text(
-            `**${knowledge.jeipyAi.name}** es un ${knowledge.jeipyAi.tagline.toLowerCase()}: entiende qué necesita cada visitante, lo orienta y lo acerca a convertirse en cliente. Como lo estoy haciendo contigo.`,
+            `**${knowledge.jeipyAi.name}** convierte tu página en un asistente que responde, orienta y ayuda a transformar visitantes en clientes, incluso cuando tú no estás disponible. Como lo estoy haciendo contigo.`,
+          ),
+          text("Se suma a tu plan web en tres niveles:"),
+          {
+            type: "list",
+            items: knowledge.aiTiers.map((t) => `**${t.name}** (${lowerFirst(t.pairsWith)}): ${lowerFirst(t.audience)}`),
+          },
+          text("No reemplaza tu página: la potencia. Tiene una configuración inicial de pago único y una operación mensual según el nivel de uso."),
+        ],
+        quickReplies: ["¿Cuánto cuesta Jeipy AI?", "Quiero automatizar mi negocio", "¿Qué plan me conviene?"],
+        state,
+      };
+    case "ai-pricing":
+      return {
+        blocks: [
+          text("Jeipy AI se contrata aparte del plan web. Estos son los valores de configuración inicial:"),
+          { type: "list", items: (["lite", "pro", "custom"] as const).map((id) => aiTierPriceLine(id)) },
+          text("Para que quede claro, hay tres conceptos distintos:"),
+          priceConcepts(),
+          text("La mensualidad no tiene un valor fijo publicado: depende del uso y del servicio. Si me cuentas de tu negocio, te oriento sobre el nivel que necesitas."),
+        ],
+        quickReplies: ["Continuar el diagnóstico", "¿Cuánto es la mensualidad?", "Hablar con una persona"],
+        state,
+      };
+    case "ai-monthly":
+      return {
+        blocks: [
+          text(
+            "La operación mensual de Jeipy AI cubre el uso de la IA, mantenimiento, actualizaciones, soporte y optimización. Su valor depende del nivel de uso y del alcance de tu solución, así que no tengo una cifra fija y prefiero no inventarla.",
           ),
           {
             type: "list",
-            items: [
-              "**Atiende:** preguntas frecuentes, productos o servicios y recomendaciones.",
-              "**Capta:** datos de clientes potenciales, formularios conversacionales y clasificación inicial.",
-              "**Conecta:** paso a WhatsApp, reservas o agendamiento y automatizaciones a medida.",
-            ],
+            items: knowledge.aiTiers.map((t) => `**${t.name}:** ${lowerFirst(t.maintenance.value)}.`),
           },
           text(
-            `En Esencial se suma como opción y en Premium es parte de la propuesta. Las funciones avanzadas dependen del alcance de cada proyecto. ${knowledge.jeipyAi.costNote}`,
+            "Es distinta de la configuración inicial, que se paga una sola vez. Si seguimos con el diagnóstico, puedo orientarte sobre el nivel que necesitas y el equipo te confirma la mensualidad estimada.",
           ),
         ],
-        quickReplies: ["¿Qué plan me conviene?", "Quiero cotizar una página"],
+        quickReplies: ["Continuar el diagnóstico", "Ver niveles de Jeipy AI", "Hablar con una persona"],
         state,
       };
+    case "ai-tier":
+      return aiTierInfo(intent.tier, state);
     case "guarantee":
       return {
         blocks: [
@@ -593,6 +680,22 @@ function answerIntent(intent: Intent, state: ConversationState): Reply | null {
     default:
       return null;
   }
+}
+
+/** El visitante eligió un nivel de Jeipy AI (p. ej. desde los CTA de la sección Planes). */
+function startAiTierFlow(id: AiTierId, state: ConversationState): Reply {
+  const tier = getAiTier(id);
+  const p = state.profile;
+  const features = { ...p.features, ai: true };
+  if (id !== "lite") features.automation = true;
+  if (id === "custom") features.integrations = true;
+  const profile: Profile = { ...p, aiTier: id, aiLevel: id === "lite" ? "basic" : "advanced", goal: p.goal ?? "automate", features };
+  const intro: Record<AiTierId, string> = {
+    lite: `Buena elección. **${tier.name}** se suma a tu página para responder preguntas frecuentes, orientar y captar datos, sin complicaciones. Se combina con el plan Esencial: primero entendamos tu negocio para confirmar la base web que lo acompaña.`,
+    pro: `Buena decisión. **${tier.name}** convierte el asistente en una herramienta comercial: diagnostica, recomienda, clasifica clientes potenciales y agenda cuando aplica. Va de la mano del plan Premium. Para proponerte algo a tu medida, quiero entender tu negocio.`,
+    custom: `Perfecto. **${tier.name}** se diseña a partir de tu operación: integraciones, CRM, múltiples flujos o cotizaciones. Para preparar una propuesta orientativa, cuéntame un poco de tu proyecto.`,
+  };
+  return startFlow(id === "custom" ? "quote" : "advisor", { ...state, profile }, intro[id]);
 }
 
 /* ---------------------------------------------------------------
@@ -648,6 +751,7 @@ export function respond(input: string, current: ConversationState): Reply {
 
     // Una duda, objeción o petición en medio del diagnóstico: se atiende y se retoma.
     if (intent && !["quote", "recommend", "digitalize", "which-best", "unsure"].includes(intent.type)) {
+      if (intent.type === "ai-tier" && intent.wants) return startAiTierFlow(intent.tier, { ...current, expecting: null });
       if (intent.type === "human" || intent.type === "lead" || intent.type === "objection-price" || intent.type === "advance") {
         return respond(input, { ...current, expecting: null });
       }
@@ -699,7 +803,7 @@ export function respond(input: string, current: ConversationState): Reply {
   if (t.includes(" seguir con el asistente") || t.includes(" tengo otra duda")) {
     return {
       blocks: [text("Perfecto, sigo aquí. ¿Qué te gustaría saber?")],
-      quickReplies: current.recommended ? ["¿Qué incluye exactamente?", "¿Qué puede hacer Jeipy AI?", "Ver precios"] : CHIPS.start,
+      quickReplies: current.recommended ? ["¿Qué incluye exactamente?", "¿Cuánto cuesta Jeipy AI?", "Ver precios"] : CHIPS.start,
       state: current,
     };
   }
@@ -713,6 +817,8 @@ export function respond(input: string, current: ConversationState): Reply {
   const enriched = enrichProfile(current.profile, input);
   const learned = JSON.stringify(enriched) !== JSON.stringify(current.profile);
   const withProfile = { ...current, profile: enriched };
+
+  if (intent?.type === "ai-tier" && intent.wants) return startAiTierFlow(intent.tier, withProfile);
 
   switch (intent?.type) {
     case "plans-overview":

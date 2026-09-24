@@ -1,6 +1,8 @@
+import type { JeipyAiTierId } from "@/data/jeipyAi";
 import type { Plan } from "@/data/plans";
 
 export type PlanId = Plan["id"];
+export type AiTierId = JeipyAiTierId;
 
 /* ---------------------------------------------------------------
    Perfil del visitante: lo que el asistente va entendiendo.
@@ -16,8 +18,8 @@ export type Feature = "catalog" | "booking" | "forms" | "ai" | "integrations" | 
 
 /**
  * Nivel de IA que necesita el visitante:
- * - basic: responder dudas, explicar servicios, orientar y captar datos básicos (Esencial + Jeipy AI).
- * - advanced: reservas, cotizaciones, clasificación de leads o procesos automatizados (Premium).
+ * - basic: responder dudas, explicar servicios, orientar y captar datos básicos (Esencial + Jeipy AI Lite).
+ * - advanced: reservas, cotizaciones, clasificación de leads o procesos automatizados (Premium + Jeipy AI Pro).
  */
 export type AiLevel = "basic" | "advanced";
 
@@ -33,6 +35,8 @@ export type Profile = {
   features: FeatureMap;
   budget?: Budget;
   aiLevel?: AiLevel;
+  /** Nivel de Jeipy AI que el visitante pidió de forma explícita (p. ej. desde un CTA). */
+  aiTier?: AiTierId;
   /** Datos de contacto, solo si el visitante decide dejarlos. */
   name?: string;
   contact?: string;
@@ -67,6 +71,8 @@ export type ConversationState = {
   expecting: Slot | null;
   profile: Profile;
   recommended?: PlanId;
+  /** Nivel de Jeipy AI sugerido junto al plan recomendado. */
+  recommendedAi?: AiTierId;
   /** El cliente ya vio las opciones de contacto (se ofrecen una sola vez al cerrar la cotización). */
   handoffOffered: boolean;
   /** Preguntas que el visitante prefirió no responder: no se repiten. */
@@ -85,8 +91,8 @@ export type MessageBlock =
   | {
       type: "recommendation";
       planId: PlanId;
-      /** Esencial con Jeipy AI como complemento opcional. */
-      withAiAddon?: boolean;
+      /** Nivel de Jeipy AI sugerido como complemento (se contrata aparte del plan web). */
+      aiTier?: AiTierId;
       /** Respuestas del visitante que llevaron a la recomendación. */
       because: string[];
       /** Qué cubre el plan recomendado. */
@@ -110,6 +116,7 @@ export type Lead = {
   summary: string;
   profile: Profile;
   plan?: PlanId;
+  aiTier?: AiTierId;
 };
 
 /** Efectos que el motor pide ejecutar fuera de la conversación (guardar, notificar…). */

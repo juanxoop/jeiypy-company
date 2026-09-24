@@ -22,7 +22,7 @@ Jeipy AI es un **asesor inteligente dentro de la web**, no un chatbot genérico 
 - No inventar precios, servicios, plazos ni capacidades. Si algo no está en la base de conocimiento, lo dice y ofrece continuar con una persona.
 - No presentarse como "chatbot". Se presenta como un asistente inteligente para el negocio.
 - Las recomendaciones son orientativas. El alcance y el precio final los confirma el equipo.
-- Jeipy AI puede requerir configuración inicial y una mensualidad según uso, complejidad e integraciones. No se publica una cifra.
+- Jeipy AI se contrata aparte del plan web: configuración inicial (pago único) + operación mensual según uso. **Nunca se inventa la mensualidad**: si la preguntan, explica que depende del uso y del alcance y ofrece seguir con el diagnóstico para estimarla.
 
 ## 2. Conocimiento
 
@@ -30,9 +30,9 @@ Se construye a partir de los mismos datos de la web (`src/data`), así que nunca
 - **Empresa:** qué es Jeipy, a quién ayuda, el lema y el país.
 - **Servicios:** los 6 servicios con su descripción.
 - **Planes:** Básico, Esencial y Premium, con precio desde, resumen, lo que incluyen y cómo aparece Jeipy AI en cada uno.
-- **Jeipy AI:** qué hace (Atiende, Capta, Conecta), su disponibilidad por plan y la nota de costos.
+- **Jeipy AI** (`src/data/jeipyAi.ts`): niveles Lite (desde $200.000, hasta 2 ajustes al mes), Pro (desde $350.000, 3 a 4 ajustes) y Custom (desde $479.900, según alcance), su relación con cada plan y los dos conceptos de precio: configuración inicial y operación mensual.
 - **Proceso:** Descubrimos → Diseñamos → Desarrollamos → Lanzamos.
-- **Temas sin información configurada** (se reconocen y no se improvisan): tiempos de entrega, formas de pago, dominio y hosting, tiendas con pagos en línea y mantenimiento mensual.
+- **Temas sin información configurada** (se reconocen y no se improvisan): tiempos de entrega, formas de pago, dominio y hosting y tiendas con pagos en línea.
 
 ## 3. Lógica de conversación
 
@@ -145,13 +145,18 @@ src/features/assistant/
 | --- | --- |
 | **Básico** | Presencia digital: página informativa, WhatsApp, ubicación, contacto y servicios básicos. |
 | **Esencial** | Captar clientes, catálogo, formularios, SEO básico, Analytics y mejor estructura comercial. |
-| **Esencial + Jeipy AI opcional** | Lo anterior + IA ligera: responder preguntas frecuentes, explicar servicios, orientar, recomendar opciones sencillas y captar datos básicos. Sin automatizaciones complejas; la IA se cotiza aparte. |
-| **Premium** | Una o varias: reservas o agendamiento automatizado, cotizaciones automatizadas, flujos personalizados, integraciones, clasificación o seguimiento de clientes, automatización de procesos comerciales, IA avanzada o una solución muy personalizada. |
+| **Esencial + Jeipy AI Lite (opcional)** | Lo anterior + IA ligera: responder preguntas frecuentes, explicar servicios, orientar y captar datos básicos. Sin automatizaciones complejas; la IA se contrata aparte. |
+| **Premium** | Una o varias: reservas o agendamiento automatizado, cotizaciones automatizadas, flujos personalizados, integraciones, clasificación o seguimiento de clientes, automatización de procesos comerciales, IA avanzada o una solución muy personalizada. Si quiere IA: **Premium + Jeipy AI Pro**. |
+| **Premium + Jeipy AI Custom** | Proyectos especiales: integraciones y automatización a medida (o el visitante pide Custom). |
 
 - **Mencionar "IA" no lleva a Premium.** Decide el **nivel de IA** (`aiLevel`): básico (dudas, orientación, datos) o avanzado (gestionar, clasificar, automatizar). Se deduce del texto o se pregunta.
 - **Desempate:** si quiere IA y no hay otra señal de Premium, pregunta antes de elegir: "¿Quieres que la IA solo responda dudas y capture información, o también que automatice reservas, cotizaciones o procesos?".
 - **Si describe su negocio en un mensaje** (aunque mencione IA), lo toma como información del diagnóstico. Solo una pregunta directa ("¿qué hace Jeipy AI?") recibe la explicación general.
 - **Cada recomendación explica:** 1) el plan; 2) "Por lo que me contaste" (sus respuestas; en Premium, primero las de automatización); 3) "Qué cubre"; 4) "Qué cambiaría" para que otro plan tuviera más sentido.
+
+**Precios de Jeipy AI:** el asistente separa siempre tres conceptos: el precio del plan web, la configuración inicial de Jeipy AI (pago único) y la operación mensual (uso, mantenimiento, actualizaciones, soporte y optimización). Básico no incluye IA; Esencial es compatible con Lite; Premium con Pro; Custom es para proyectos especiales. Ningún plan incluye la IA en su precio.
+
+**CTA de la sección Planes:** "Agregar Jeipy AI", "Quiero automatizar mi negocio" y "Consultar solución" abren el asistente (evento `jeipy-ai:open`, `src/features/assistant/open.ts`) con un primer mensaje. Lite y Pro inician el diagnóstico con el nivel de IA ya definido; Custom inicia la cotización.
 
 **Objeciones:**
 | El visitante dice | Jeipy AI |
@@ -161,6 +166,7 @@ src/features/assistant/
 | "¿Cuál es mejor?" | "Depende de lo que quieras lograr…" y dos preguntas antes de recomendar (también a mitad del diagnóstico). |
 | "Lo voy a pensar" | Sin presión: ofrece dejar el resumen para revisarlo con calma. |
 | "¿Garantizan resultados?" | No promete resultados. Explica cómo está pensada la web para convertir. |
+| "¿Cuánto es la mensualidad?" | No da cifras: explica qué cubre, que depende del uso y del alcance, los ajustes incluidos por nivel, y ofrece continuar el diagnóstico. |
 
 **Cotización:** diagnóstico → presupuesto (opcional) → recomendación → nombre → medio de contacto (WhatsApp o correo, se puede omitir) → resumen de la solicitud y resumen interno del lead, por ejemplo: `Lead: barbería / necesita conseguir más clientes + catálogo + reservas / interés en IA / plan orientativo Esencial.` "Quiero avanzar" después de una recomendación va directo a pedir los datos.
 

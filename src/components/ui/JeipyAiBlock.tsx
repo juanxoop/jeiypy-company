@@ -1,44 +1,57 @@
+import Link from "next/link";
 import { AssistantOrb } from "@/features/assistant/components/AssistantOrb";
 import { jeipyAi, type PlanAi } from "@/data/plans";
 import { cn } from "@/lib/cn";
 
+/** Enlace discreto hacia la oferta completa de Jeipy AI, dentro de la sección Planes. */
+function OfferLink({ label }: { label: string }) {
+  return (
+    <Link
+      href="#jeipy-ai"
+      className="group mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-glow transition-colors hover:text-snow"
+    >
+      {label}
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden className="jp-arrow size-3.5">
+        <path d="M3 8h9.5M8.5 3.5 13 8l-4.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </Link>
+  );
+}
+
 /**
- * Espacio de Jeipy AI dentro de cada plan, con tres niveles de protagonismo:
- * "none" (no incluido), "addon" (mejora opcional, secundaria) y "featured" (sección propia).
+ * Relación de cada plan con Jeipy AI, con tres niveles de protagonismo:
+ * "none" (sin IA), "addon" (Lite como complemento opcional) y "featured" (compatible con Pro).
+ * En ningún caso la IA forma parte del precio del plan: se contrata aparte.
  */
 export function JeipyAiBlock({ ai, className }: { ai: PlanAi; className?: string }) {
   if (ai.mode === "none") {
     return (
-      <p className={cn("flex items-center justify-between gap-3 rounded-xl border border-line px-4 py-3 text-sm", className)}>
-        <span className="inline-flex items-center gap-2.5 text-mist">
-          <AssistantOrb still className="size-4 opacity-50 grayscale" />
-          {jeipyAi.name}
-        </span>
-        <span className="font-mono text-[10px] uppercase tracking-wider text-mist/70">{ai.tag}</span>
+      <p className={cn("flex items-center gap-2.5 rounded-xl border border-line px-4 py-3 text-[13px] text-mist", className)}>
+        <AssistantOrb still className="size-4 shrink-0 opacity-50 grayscale" />
+        {ai.note}
       </p>
     );
   }
 
   if (ai.mode === "addon") {
     return (
-      <section aria-label={`${jeipyAi.name}, opcional`} className={cn("rounded-xl border border-dashed border-line-strong p-4", className)}>
-        <div className="flex items-center gap-3">
-          <p className="inline-flex items-center gap-2.5 text-sm font-medium text-snow">
-            <span aria-hidden className="grid size-5 place-items-center rounded-md bg-jeipy/10 font-mono text-xs leading-none text-glow ring-1 ring-glow/20">
-              +
-            </span>
-            {jeipyAi.name}
-          </p>
-        </div>
-        <p className="mt-2.5 text-[13px] leading-relaxed text-mist">{ai.description}</p>
-        <p className="mt-1.5 text-xs text-mist/70">{ai.note}</p>
+      <section aria-label={`${ai.tier}, complemento opcional`} className={cn("rounded-xl border border-dashed border-line-strong p-4", className)}>
+        <p className="inline-flex items-center gap-2 rounded-full border border-glow/20 bg-jeipy/[0.08] py-1 pr-3 pl-1.5 text-xs font-medium text-snow">
+          <span aria-hidden className="grid size-4.5 place-items-center rounded-full bg-jeipy/20 font-mono text-[11px] leading-none text-glow">
+            +
+          </span>
+          {ai.tag}
+        </p>
+        <p className="mt-3 text-[13px] leading-relaxed text-mist">{ai.description}</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-mist/70">{ai.note}</p>
+        <OfferLink label={`Conocer ${ai.tier}`} />
       </section>
     );
   }
 
   return (
     <section
-      aria-label={jeipyAi.name}
+      aria-label={`${ai.tier}, compatible con este plan`}
       className={cn(
         "jp-gradient-border relative overflow-hidden rounded-2xl bg-[linear-gradient(165deg,#0e1a33_0%,#0a1224_45%,#070a11_100%)] p-5 sm:p-6",
         className,
@@ -51,10 +64,13 @@ export function JeipyAiBlock({ ai, className }: { ai: PlanAi; className?: string
       </div>
 
       <div className="relative">
-        <div className="flex items-center gap-3">
+        <p className="inline-block rounded-full border border-glow/25 bg-jeipy/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-glow">
+          {ai.tag}
+        </p>
+        <div className="mt-4 flex items-center gap-3">
           <AssistantOrb className="size-10 drop-shadow-[0_6px_16px_rgb(23_105_255/0.45)]" />
           <div>
-            <p className="font-semibold tracking-[-0.01em] text-snow">{jeipyAi.name}</p>
+            <p className="font-semibold tracking-[-0.01em] text-snow">{ai.tier}</p>
             <p className="text-xs text-glow">{jeipyAi.tagline}</p>
           </div>
         </div>
@@ -70,12 +86,8 @@ export function JeipyAiBlock({ ai, className }: { ai: PlanAi; className?: string
           ))}
         </dl>
 
-        <p className="mt-4 text-xs leading-relaxed text-mist/75">
-          <span className="mr-2 inline-block rounded-full border border-glow/25 bg-jeipy/10 px-2 py-px align-[1px] font-mono text-[10px] uppercase tracking-wider text-glow">
-            {ai.tag}
-          </span>
-          {ai.note}
-        </p>
+        <p className="mt-4 text-xs leading-relaxed text-mist/75">{ai.note}</p>
+        <OfferLink label={`Conocer ${ai.tier}`} />
       </div>
     </section>
   );

@@ -75,7 +75,7 @@ export function PlanCard({ plan, index }: { plan: Plan; index: number }) {
         </ul>
 
         <div className="mt-7">
-          {plan.ai.mode === "addon" && <SectionLabel>{plan.ai.tag}</SectionLabel>}
+          {plan.ai.mode === "addon" && <SectionLabel>Complemento opcional</SectionLabel>}
           <JeipyAiBlock ai={plan.ai} className={cn(plan.ai.mode === "addon" && "mt-3")} />
         </div>
 
