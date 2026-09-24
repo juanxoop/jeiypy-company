@@ -135,10 +135,18 @@ src/features/assistant/
 
 **Apertura:** ante "Tengo una barbería y quiero más clientes" responde "Perfecto. Para recomendarte bien, quiero entender cómo trabajas hoy. ¿Ya tienes página web o solo manejas redes y WhatsApp?". Mencionar WhatsApp como canal del negocio es un dato, no una petición de contacto.
 
-**Lógica de recomendación** (combina varias respuestas, nunca una sola palabra):
-- **Premium:** reservas o integraciones, o automatización como objetivo central junto con catálogo o captación. La explicación nombra lo que necesita y por qué el Esencial no alcanza.
-- **Esencial:** catálogo, formularios, SEO o captar clientes. Jeipy AI se ofrece como opción si le interesa responder preguntas frecuentes.
-- **Básico:** presencia profesional sencilla. Explica cuándo convendría crecer a Esencial.
+**Lógica de recomendación** (busca la solución adecuada, no la más cara):
+| Nivel | Cuándo |
+| --- | --- |
+| **Básico** | Presencia digital: página informativa, WhatsApp, ubicación, contacto y servicios básicos. |
+| **Esencial** | Captar clientes, catálogo, formularios, SEO básico, Analytics y mejor estructura comercial. |
+| **Esencial + Jeipy AI opcional** | Lo anterior + IA ligera: responder preguntas frecuentes, explicar servicios, orientar, recomendar opciones sencillas y captar datos básicos. Sin automatizaciones complejas; la IA se cotiza aparte. |
+| **Premium** | Una o varias: reservas o agendamiento automatizado, cotizaciones automatizadas, flujos personalizados, integraciones, clasificación o seguimiento de clientes, automatización de procesos comerciales, IA avanzada o una solución muy personalizada. |
+
+- **Mencionar "IA" no lleva a Premium.** Decide el **nivel de IA** (`aiLevel`): básico (dudas, orientación, datos) o avanzado (gestionar, clasificar, automatizar). Se deduce del texto o se pregunta.
+- **Desempate:** si quiere IA y no hay otra señal de Premium, pregunta antes de elegir: "¿Quieres que la IA solo responda dudas y capture información, o también que automatice reservas, cotizaciones o procesos?".
+- **Si describe su negocio en un mensaje** (aunque mencione IA), lo toma como información del diagnóstico. Solo una pregunta directa ("¿qué hace Jeipy AI?") recibe la explicación general.
+- **Cada recomendación explica:** 1) el plan; 2) "Por lo que me contaste" (sus respuestas; en Premium, primero las de automatización); 3) "Qué cubre"; 4) "Qué cambiaría" para que otro plan tuviera más sentido.
 
 **Objeciones:**
 | El visitante dice | Jeipy AI |

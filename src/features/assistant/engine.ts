@@ -26,11 +26,13 @@ import {
   extractWebsite,
   isBookingBusiness,
   isKnownBusiness,
+  isQuestion,
   normalize,
+  parseAiLevelAnswer,
   parseYesNo,
   type Intent,
 } from "./nlu";
-import { lowerPlan, recommendPlan } from "./recommend";
+import { lowerPlan, needsAiLevelQuestion, recommendPlan } from "./recommend";
 import type {
   AssistantBrain,
   AssistantTurn,
@@ -88,6 +90,8 @@ function nextSlot(state: ConversationState): Slot | null {
       ? pending({ kind: "feature", feature: "booking" }, f.booking !== undefined)
       : pending({ kind: "feature", feature: "forms" }, f.forms !== undefined || f.catalog === true),
     pending({ kind: "feature", feature: "ai" }, f.ai !== undefined),
+    // Desempate entre Esencial + Jeipy AI y Premium: qué tan profunda debe ser la automatización.
+    pending({ kind: "aiLevel" }, !needsAiLevelQuestion(profile)),
     flow === "quote" ? pending({ kind: "budget" }, profile.budget !== undefined) : null,
   ];
   return diagnosis.find((s): s is Slot => s !== null) ?? null;
@@ -116,6 +120,11 @@ function question(slot: Slot, profile: Profile): { blocks: MessageBlock[]; quick
       return {
         blocks: [text("¿Tienes un presupuesto aproximado? Es opcional, pero me ayuda a ajustar la recomendación.")],
         quickReplies: ["Hasta $600.000", "Hasta $1.000.000", "Hasta $1.500.000", "Más de $1.500.000", "Prefiero no decirlo"],
+      };
+    case "aiLevel":
+      return {
+        blocks: [text("¿Quieres que la IA solo responda dudas y capture información, o también que automatice reservas, cotizaciones o procesos?")],
+        quickReplies: ["Solo responder dudas y captar datos", "También automatizar procesos"],
       };
     case "name":
       return { blocks: [text("¿A nombre de quién preparo la propuesta?")] };
@@ -228,6 +237,17 @@ function fillSlot(slot: Slot, input: string, state: ConversationState): Filled |
       profile.features[slot.feature] = answer === "yes";
       return next();
     }
+    case "aiLevel": {
+      const value = parseAiLevelAnswer(input);
+      if (!value) return null;
+      profile.aiLevel = value;
+      if (value === "advanced") profile.features.automation = true;
+      return next(
+        value === "basic"
+          ? "Perfecto, entonces una IA ligera es suficiente: responder, orientar y captar datos."
+          : "Entendido: necesitas automatización más profunda, no solo atención básica.",
+      );
+    }
     case "name": {
       if (declines(input)) return { state: { ...state, skipped: [...state.skipped, "name", "contact"] } };
       const value = extractName(input);
@@ -266,7 +286,11 @@ const FEATURE_LABEL: Record<Feature, string> = {
   ai: "automatización con IA",
   integrations: "integraciones",
   seo: "SEO",
+  automation: "automatización de procesos",
 };
+
+const aiInterestLabel = (profile: Profile) =>
+  !profile.features.ai ? "No por ahora" : profile.aiLevel === "advanced" ? "Sí, avanzada (automatización)" : "Sí, básica (dudas y datos)";
 
 const wantedFeatures = (profile: Profile) => (Object.keys(profile.features) as Feature[]).filter((f) => profile.features[f]);
 
@@ -278,7 +302,7 @@ function summaryRows(profile: Profile, planId?: PlanId) {
   if (profile.goal) rows.push({ label: "Objetivo", value: GOAL_LABEL[profile.goal] });
   const wanted = wantedFeatures(profile).filter((f) => f !== "ai");
   if (wanted.length) rows.push({ label: "Necesita", value: capitalize(wanted.map((f) => FEATURE_LABEL[f]).join(", ")) });
-  if (profile.features.ai !== undefined) rows.push({ label: "Interés en IA", value: profile.features.ai ? "Sí" : "No por ahora" });
+  if (profile.features.ai !== undefined) rows.push({ label: "Interés en IA", value: aiInterestLabel(profile) });
   if (profile.budget) rows.push({ label: "Presupuesto", value: profile.budget === "skipped" ? "Sin definir" : formatCop(profile.budget.amount) });
   if (planId) rows.push({ label: "Plan orientativo", value: `${getPlan(planId).name} (desde ${getPlan(planId).price})` });
   if (profile.contact) rows.push({ label: "Contacto", value: profile.contact });
@@ -291,7 +315,9 @@ export function leadSummary(profile: Profile, planId?: PlanId): string {
   const needs = wantedFeatures(profile).filter((f) => f !== "ai").map((f) => FEATURE_LABEL[f]);
   if (profile.goal) needs.unshift(GOAL_LABEL[profile.goal].toLowerCase());
   if (needs.length) parts.push(`necesita ${needs.join(" + ")}`);
-  parts.push(profile.features.ai ? "interés en IA" : "sin interés en IA por ahora");
+  parts.push(
+    !profile.features.ai ? "sin interés en IA por ahora" : profile.aiLevel === "advanced" ? "interés en IA avanzada" : "interés en IA básica",
+  );
   if (profile.budget && profile.budget !== "skipped") parts.push(`presupuesto aproximado ${formatCop(profile.budget.amount)}`);
   if (planId) parts.push(`plan orientativo ${getPlan(planId).name}`);
   return `${parts.join(" / ")}.`;
@@ -694,8 +720,10 @@ export function respond(input: string, current: ConversationState): Reply {
       );
   }
 
-  // 5. Dudas de conocimiento.
-  if (intent) {
+  // 5. Dudas de conocimiento. Si el mensaje describe el negocio (no es una pregunta),
+  //    se trata como información del diagnóstico aunque mencione "IA" o "servicios".
+  const describing = learned && !isQuestion(input) && Boolean(enriched.businessType || Object.keys(enriched.features).length);
+  if (intent && !describing) {
     const answer = answerIntent(intent, current);
     if (answer) return answer;
   }

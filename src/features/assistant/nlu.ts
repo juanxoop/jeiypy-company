@@ -3,7 +3,7 @@
  * y extrae datos del perfil a partir de lenguaje libre en español.
  */
 import type { UnknownTopic } from "./knowledge";
-import type { Budget, Feature, FeatureMap, Goal, PlanId, Profile, WebsiteStatus } from "./types";
+import type { AiLevel, Budget, Feature, FeatureMap, Goal, PlanId, Profile, WebsiteStatus } from "./types";
 
 export function normalize(text: string): string {
   return ` ${text
@@ -209,9 +209,9 @@ export function extractWebsite(raw: string, { direct = false } = {}): WebsiteSta
 
 export function extractGoal(raw: string): Goal | undefined {
   const t = normalize(raw);
-  if (has(t, " automatiz", " atender", " responder", " preguntas frecuentes")) return "automate";
   if (has(t, " vender", " ventas", " vendo")) return "sell";
   if (has(t, " clientes", " captar", " atraer", " crecer")) return "clients";
+  if (has(t, " automatiz", " atender", " responder", " preguntas frecuentes")) return "automate";
   if (has(t, " profesional", " imagen", " credibilidad", " confianza", " seriedad")) return "image";
   if (has(t, " mostrar", " catalogo", " exhibir", " informar", " dar a conocer", " conocer")) return "showcase";
   return undefined;
@@ -219,9 +219,13 @@ export function extractGoal(raw: string): Goal | undefined {
 
 const FEATURE_KEYWORDS: Record<Feature, string[]> = {
   catalog: [" catalogo", " productos", " servicios y precios", " precios", " menu", " carta", " portafolio de", " mostrar mis servicios"],
-  booking: [" reserva", " agenda", " agendar", " cita", " citas", " turno"],
+  booking: [" reserva", " reserven", " agenda", " agendar", " cita", " citas", " turno"],
   forms: [" formulario", " solicitudes", " cotizaciones de clientes"],
-  ai: [" preguntas frecuentes", " automatiz", " asistente", " inteligencia artificial", " chatbot", " responder automatic"],
+  ai: [" preguntas frecuentes", " automatiz", " asistente", " inteligencia artificial", " chatbot", " responder automatic", " una ia", " la ia", " ia "],
+  automation: [
+    " clasific", " seguimiento", " cotizaciones automatic", " cotizacion automatic", " cotice", " flujos", " procesos",
+    " automatizar procesos", " automatice", " gestione", " embudo",
+  ],
   integrations: [" integracion con", " integrar", " crm", " sistema de inventario", " software"],
   seo: [" google", " seo", " aparecer en", " posicionamiento", " buscadores"],
 };
@@ -262,6 +266,27 @@ export function extractBudget(raw: string): Budget | undefined {
   return undefined;
 }
 
+const ADVANCED_AI = [" clasific", " seguimiento", " gestione", " automatice", " procesos", " flujos", " cotice", " cotizaciones automatic", " reserven", " reservas automatic", " agende"];
+const BASIC_AI = [" preguntas frecuentes", " responda", " responder", " dudas", " explique", " oriente", " orientar", " recomiende"];
+
+/** Nivel de IA que se deduce del texto (solo cuando se habla de IA o automatización). */
+export function extractAiLevel(raw: string): AiLevel | undefined {
+  const t = normalize(raw);
+  if (has(t, ...ADVANCED_AI)) return "advanced";
+  if (has(t, ...BASIC_AI)) return "basic";
+  return undefined;
+}
+
+/** Respuesta a "¿solo responder dudas… o también automatizar reservas, cotizaciones o procesos?" */
+export function parseAiLevelAnswer(raw: string): AiLevel | undefined {
+  const t = normalize(raw);
+  if (has(t, " tambien", " automatiz", " reserva", " cotizacion", " procesos", " avanzad", " todo")) {
+    return has(t, " solo ") && !has(t, " tambien") ? "basic" : "advanced";
+  }
+  if (has(t, " solo", " dudas", " responder", " captar", " basic", " sencill", " informacion")) return "basic";
+  return undefined;
+}
+
 /** Aplica al perfil todo lo que se pueda deducir de un mensaje libre. */
 export function enrichProfile(profile: Profile, raw: string): Profile {
   const next: Profile = { ...profile, features: { ...profile.features } };
@@ -271,6 +296,7 @@ export function enrichProfile(profile: Profile, raw: string): Profile {
   for (const [feature, value] of Object.entries(extractFeatures(raw)) as [Feature, boolean][]) {
     if (next.features[feature] === undefined) next.features[feature] = value;
   }
+  if (next.features.ai && !next.aiLevel) next.aiLevel = extractAiLevel(raw);
   return next;
 }
 

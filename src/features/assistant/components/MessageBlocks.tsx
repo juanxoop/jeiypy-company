@@ -81,29 +81,41 @@ function RecommendationCard({
       <div className="relative">
         <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-glow">Recomendación orientativa</p>
         <p className="mt-2 flex flex-wrap items-baseline gap-x-2">
-          <span className="text-lg font-semibold tracking-[-0.02em] text-snow">Plan {plan.name}</span>
+          <span className="text-lg font-semibold tracking-[-0.02em] text-snow">
+            Plan {plan.name}
+            {block.withAiAddon && <span className="text-glow"> + Jeipy AI</span>}
+          </span>
           <span className="text-[13px] text-mist">
             desde {plan.price} {plan.currency}
+            {block.withAiAddon && " · IA opcional, se cotiza aparte"}
           </span>
         </p>
 
-        <p className="mt-3 text-[12px] font-medium text-mist/90">Por qué</p>
+        <p className="mt-3 text-[12px] font-medium text-mist/90">Por lo que me contaste</p>
+        <ul className="mt-1.5 space-y-1">
+          {block.because.map((item) => (
+            <li key={item} className="flex gap-2 text-[13px] leading-snug text-snow/85">
+              <span aria-hidden className="mt-[0.55em] size-1 shrink-0 rounded-full bg-glow/80" />
+              {item}
+            </li>
+          ))}
+        </ul>
+
+        <p className="mt-3 text-[12px] font-medium text-mist/90">Qué cubre</p>
         <ul className="mt-1.5 space-y-1.5">
-          {block.reasons.map((reason) => (
-            <li key={reason} className="flex gap-2 text-[13px] leading-snug text-snow/85">
+          {block.covers.map((item) => (
+            <li key={item} className="flex gap-2 text-[13px] leading-snug text-snow/85">
               <span className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full bg-jeipy/20 text-glow">
                 <CheckIcon className="size-2.5" />
               </span>
-              {reason}
+              {item}
             </li>
           ))}
         </ul>
 
         {block.alternative && (
           <p className="mt-3 border-t border-white/[0.07] pt-3 text-[13px] leading-snug text-mist">
-            <span className="mr-1.5 text-glow" aria-hidden>
-              ↳
-            </span>
+            <span className="mr-1.5 font-medium text-snow/80">Qué cambiaría:</span>
             {block.alternative}
           </p>
         )}

@@ -8,7 +8,18 @@ export type PlanId = Plan["id"];
 
 export type Goal = "clients" | "image" | "showcase" | "sell" | "automate";
 export type WebsiteStatus = "yes" | "no" | "social";
-export type Feature = "catalog" | "booking" | "forms" | "ai" | "integrations" | "seo";
+/**
+ * Capacidades que puede necesitar el negocio.
+ * `automation`: cotizaciones automatizadas, clasificación o seguimiento de clientes, flujos y procesos comerciales.
+ */
+export type Feature = "catalog" | "booking" | "forms" | "ai" | "integrations" | "seo" | "automation";
+
+/**
+ * Nivel de IA que necesita el visitante:
+ * - basic: responder dudas, explicar servicios, orientar y captar datos básicos (Esencial + Jeipy AI).
+ * - advanced: reservas, cotizaciones, clasificación de leads o procesos automatizados (Premium).
+ */
+export type AiLevel = "basic" | "advanced";
 
 /** `true` lo quiere, `false` lo descartó, ausente = aún no se sabe. */
 export type FeatureMap = Partial<Record<Feature, boolean>>;
@@ -21,6 +32,7 @@ export type Profile = {
   goal?: Goal;
   features: FeatureMap;
   budget?: Budget;
+  aiLevel?: AiLevel;
   /** Datos de contacto, solo si el visitante decide dejarlos. */
   name?: string;
   contact?: string;
@@ -37,6 +49,8 @@ export type Slot =
   | { kind: "goal" }
   | { kind: "feature"; feature: Feature }
   | { kind: "budget" }
+  /** Pregunta de desempate entre Esencial + Jeipy AI y Premium. */
+  | { kind: "aiLevel" }
   | { kind: "name" }
   | { kind: "contact" }
   /** Confirmación de un plan alternativo propuesto ante una objeción. */
@@ -71,7 +85,13 @@ export type MessageBlock =
   | {
       type: "recommendation";
       planId: PlanId;
-      reasons: string[];
+      /** Esencial con Jeipy AI como complemento opcional. */
+      withAiAddon?: boolean;
+      /** Respuestas del visitante que llevaron a la recomendación. */
+      because: string[];
+      /** Qué cubre el plan recomendado. */
+      covers: string[];
+      /** Qué tendría que cambiar para que otro plan tuviera más sentido. */
       alternative?: string;
       notes?: string[];
     }
