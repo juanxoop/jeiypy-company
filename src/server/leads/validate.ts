@@ -99,6 +99,7 @@ export function validateLead(input: unknown): ValidationResult {
       preferredChannel: oneOf(b.preferredChannel, CHANNELS),
       transcript: transcript(b.transcript),
       isUpdate: b.isUpdate === true,
+      backupNotified: b.backupNotified === true,
     },
   };
 }

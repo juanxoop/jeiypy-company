@@ -3,15 +3,67 @@
 import { AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { hasPendingLead, retryPendingLead } from "@/features/leads/client";
 import { assistantConfig } from "@/config/assistant";
 import { cn } from "@/lib/cn";
 import { OPEN_ASSISTANT_EVENT, type OpenAssistantDetail } from "../open";
 import { AssistantOrb } from "./AssistantOrb";
 
-/** El panel (conversación + motor) se descarga solo cuando el visitante muestra interés. */
-const loadPanel = () => import("./AssistantPanel").then((mod) => mod.AssistantPanel);
+import { DegradedPanel } from "./Fallback";
+
+type PanelProps = { onClose: () => void; request?: { id: number; message: string }; onRequestHandled?: () => void };
+
+/**
+ * El panel (conversación + motor) se descarga solo cuando el visitante muestra interés.
+ * Si no se puede cargar (red, despliegue nuevo…), se muestra el panel de contingencia.
+ */
+const loadPanel = () =>
+  import("./AssistantPanel")
+    .then((mod) => mod.AssistantPanel as ComponentType<PanelProps>)
+    .catch((error) => {
+      console.error("[Jeipy AI] No se pudo cargar el asistente; se muestra el modo de contingencia.", error);
+      return DegradedPanel as ComponentType<PanelProps>;
+    });
 const AssistantPanel = dynamic(loadPanel, { ssr: false });
+
+/** Si el asistente falla al mostrarse, la captación sigue con el panel de contingencia. */
+class PanelBoundary extends Component<{ onClose: () => void; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.error("[Jeipy AI] El asistente falló; se muestra el modo de contingencia.", error);
+  }
+  render() {
+    return this.state.failed ? <DegradedPanel onClose={this.props.onClose} /> : this.props.children;
+  }
+}
+
+/** Reintenta en segundo plano un lead que quedó guardado en el navegador tras una falla. */
+function usePendingLeadSync() {
+  useEffect(() => {
+    let running = false;
+    const sync = async () => {
+      if (running || !navigator.onLine || !hasPendingLead()) return;
+      running = true;
+      try {
+        await retryPendingLead();
+      } finally {
+        running = false;
+      }
+    };
+    const first = window.setTimeout(sync, 4_000);
+    const interval = window.setInterval(sync, 60_000);
+    window.addEventListener("online", sync);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(interval);
+      window.removeEventListener("online", sync);
+    };
+  }, []);
+}
 
 /**
  * Widget flotante de Jeipy AI: orbe con personalidad propia que abre el asistente.
@@ -19,6 +71,7 @@ const AssistantPanel = dynamic(loadPanel, { ssr: false });
 export function AssistantLauncher() {
   // La bandeja privada del equipo no muestra el asistente público.
   const hidden = usePathname()?.startsWith("/admin") ?? false;
+  usePendingLeadSync();
   const [open, setOpen] = useState(false);
   const [request, setRequest] = useState<{ id: number; message: string }>();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -109,7 +162,13 @@ export function AssistantLauncher() {
         </button>
       </div>
 
-      <AnimatePresence>{open && <AssistantPanel onClose={close} request={request} onRequestHandled={clearRequest} />}</AnimatePresence>
+      <AnimatePresence>
+        {open && (
+          <PanelBoundary key="panel" onClose={close}>
+            <AssistantPanel onClose={close} request={request} onRequestHandled={clearRequest} />
+          </PanelBoundary>
+        )}
+      </AnimatePresence>
     </>
   );
 }

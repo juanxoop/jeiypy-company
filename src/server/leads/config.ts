@@ -16,9 +16,21 @@ export const leadsConfig = {
     .split(",")
     .map((email) => email.trim())
     .filter(Boolean),
+  /** Alertas de errores repetidos: correo (por defecto, el mismo del equipo) y/o webhook (Slack, Discord…). */
+  alerts: {
+    recipients: (env("JEIPY_ALERTS_EMAIL") ?? env("JEIPY_LEADS_EMAIL") ?? "")
+      .split(",")
+      .map((email) => email.trim())
+      .filter(Boolean),
+    webhookUrl: env("LEADS_ALERT_WEBHOOK_URL"),
+  },
+  /** Token para que un monitor externo consulte /api/health (Authorization: Bearer <token>). */
+  healthToken: env("HEALTHCHECK_TOKEN"),
   resend: {
     apiKey: env("RESEND_API_KEY"),
     /** Remitente verificado en Resend. `onboarding@resend.dev` solo entrega al correo de la cuenta de Resend. */
     from: env("LEADS_EMAIL_FROM") ?? "Jeipy AI <onboarding@resend.dev>",
+    /** Solo para pruebas o proxies: por defecto, la API oficial de Resend. */
+    apiUrl: (env("RESEND_API_URL") ?? "https://api.resend.com").replace(/\/$/, ""),
   },
 };

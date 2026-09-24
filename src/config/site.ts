@@ -48,6 +48,8 @@ export const siteConfig = {
  */
 export const contactConfig = {
   whatsappNumber: (process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "").replace(/\D/g, ""),
+  /** Teléfono para llamadas directas (NEXT_PUBLIC_CONTACT_PHONE); si falta, se usa el de WhatsApp. */
+  phone: (process.env.NEXT_PUBLIC_CONTACT_PHONE || process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "").replace(/\D/g, ""),
   defaultMessage: "Hola Jeipy, quiero digitalizar mi negocio.",
   fallbackHref: "#contacto",
 } as const;

@@ -34,21 +34,110 @@ export function toTranscript(messages: ChatMessage[]): TranscriptEntry[] {
     .slice(-80);
 }
 
-export async function submitLead(lead: LeadDraft, messages: ChatMessage[]): Promise<LeadSubmitResult> {
-  try {
-    const response = await fetch("/api/leads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...lead, transcript: toTranscript(messages) }),
-    });
-    const result = (await response.json().catch(() => null)) as LeadSubmitResult | null;
-    // Éxito solo con la confirmación del servidor (id del lead guardado en la base de datos).
-    if (response.ok && result?.ok && result.id) return result;
-    const failure = result && !result.ok ? result : { ok: false as const, error: "failed" as const };
-    console.error(`[Jeipy AI] No se pudo enviar la solicitud (${response.status} · ${failure.error}${failure.requestId ? ` · ref ${failure.requestId}` : ""}).`);
-    return failure;
-  } catch (error) {
-    console.error("[Jeipy AI] No se pudo contactar al servidor para enviar la solicitud.", error);
-    return { ok: false, error: "failed" };
+type Payload = LeadDraft & { transcript?: TranscriptEntry[] };
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function post(payload: Payload): Promise<LeadSubmitResult> {
+  let lastError: unknown;
+  // Un reintento rápido si la red del cliente falla antes de llegar al servidor
+  // (los reintentos contra la base de datos los hace el servidor).
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = (await response.json().catch(() => null)) as LeadSubmitResult | null;
+      // Éxito solo con la confirmación del servidor (id del lead guardado en la base de datos).
+      if (response.ok && result?.ok && result.id) return result;
+      const failure = result && !result.ok ? result : { ok: false as const, error: "failed" as const };
+      console.error(
+        `[Jeipy AI] No se pudo enviar la solicitud (${response.status} · ${failure.error}${failure.requestId ? ` · ref ${failure.requestId}` : ""}${failure.backup === "email" ? " · llegó por correo de respaldo" : ""}).`,
+      );
+      return failure;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) await sleep(1_500);
+    }
   }
+  console.error("[Jeipy AI] No se pudo contactar al servidor para enviar la solicitud.", lastError);
+  return { ok: false, error: "failed", backup: "none" };
+}
+
+/* ---------------------------------------------------------------
+   Respaldo en el navegador: si el envío falla, los datos se guardan
+   temporalmente aquí y se reintentan hasta que el servidor confirme.
+   --------------------------------------------------------------- */
+
+const PENDING_KEY = "jeipy-ai:pending-lead";
+const PENDING_TTL_MS = 72 * 3_600_000;
+export const LEAD_SYNCED_EVENT = "jeipy-ai:lead-synced";
+
+type Pending = { payload: Payload; savedAt: number; attempts: number };
+
+function readPending(): Pending | null {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    const pending = JSON.parse(raw) as Pending;
+    if (Date.now() - pending.savedAt > PENDING_TTL_MS) {
+      localStorage.removeItem(PENDING_KEY);
+      return null;
+    }
+    return pending;
+  } catch {
+    return null;
+  }
+}
+
+function writePending(pending: Pending | null) {
+  try {
+    if (pending) localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+    else localStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* sin almacenamiento local: solo queda el reintento manual */
+  }
+}
+
+export const hasPendingLead = () => readPending() !== null;
+
+/** Envía el lead. Si falla (salvo datos inválidos), lo deja guardado en el navegador para reintentar. */
+export async function submitLead(lead: LeadDraft, messages: ChatMessage[]): Promise<LeadSubmitResult> {
+  const payload: Payload = { ...lead, transcript: toTranscript(messages) };
+  const result = await post(payload);
+  if (result.ok) writePending(null);
+  else if (result.error !== "invalid") {
+    const previous = readPending();
+    writePending({
+      payload: { ...payload, backupNotified: result.backup === "email" || previous?.payload.backupNotified },
+      savedAt: previous?.savedAt ?? Date.now(),
+      attempts: (previous?.attempts ?? 0) + 1,
+    });
+  }
+  return result;
+}
+
+/**
+ * Reintenta en segundo plano un lead guardado en el navegador. Al confirmarse, lo borra y
+ * avisa con el evento `jeipy-ai:lead-synced` (el chat, si está abierto, lo muestra).
+ */
+export async function retryPendingLead(): Promise<LeadSubmitResult | null> {
+  const pending = readPending();
+  if (!pending) return null;
+  const result = await post(pending.payload);
+  if (result.ok) {
+    writePending(null);
+    window.dispatchEvent(new CustomEvent(LEAD_SYNCED_EVENT, { detail: { conversationId: pending.payload.conversationId } }));
+  } else if (result.error === "invalid") {
+    writePending(null);
+  } else {
+    writePending({
+      ...pending,
+      attempts: pending.attempts + 1,
+      payload: { ...pending.payload, backupNotified: pending.payload.backupNotified || result.backup === "email" },
+    });
+  }
+  return result;
 }

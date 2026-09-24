@@ -204,7 +204,14 @@ El nivel aceptado queda como tope (`planCap`) y las recomendaciones siguientes l
 
 **Envío real:** el motor emite el efecto `submit-lead` y `useAssistant` lo envía a `POST /api/leads` junto con el historial mientras muestra "Enviando tu solicitud…". El servidor lo guarda en Supabase y solo responde éxito con la fila confirmada. Después avisa por correo (Resend, opcional). Si falla: "No pudimos enviar tu solicitud. Puedes intentarlo nuevamente o continuar por WhatsApp", y el error queda registrado con una referencia. El lead aparece en la bandeja privada `/admin/leads`. No promete tiempos de respuesta.
 
-**Estado interno** (no se muestra al cliente): Nuevo, Contactado, Interesado, Cotización, Solicita llamada, Cerrado o No interesado. El asistente asigna el inicial y el equipo lo gestiona desde la bandeja.
+**Estado interno** (no se muestra al cliente): Nuevo, Contactado, Interesado, Cotización, Solicita llamada, Cerrado - Ganado, Cerrado - No interesado o Cerrado - Sin respuesta. El asistente asigna el inicial y el equipo lo gestiona desde la bandeja. Cerrar nunca borra.
+
+**Contingencia:**
+- **Supabase falla tras los reintentos:** el mensaje es "Tu solicitud llegó por un canal alternativo" si el correo de respaldo salió, o "No pudimos enviar tu solicitud" si no. En ambos casos:
+  - aparecen WhatsApp y "Llamar ahora";
+  - los datos quedan en el navegador y se reintentan solos;
+  - al confirmarse, el chat muestra "Solicitud recibida".
+- **El asistente falla o no carga:** aparece un formulario mínimo (nombre, celular, negocio, necesidad, llamada y autorización) que usa el mismo envío real.
 
 ## 8. Próxima fase: integración real
 

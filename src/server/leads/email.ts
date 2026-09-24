@@ -59,7 +59,8 @@ export function renderLeadEmail(lead: LeadRecord, id?: string) {
         ? `<details style="margin-top:20px;font-size:13px"><summary style="cursor:pointer;color:#8994a7">Conversación completa</summary><pre style="white-space:pre-wrap;font-family:inherit;line-height:1.5">${escape(transcriptText)}</pre></details>`
         : ""
     }
-    <p style="margin-top:20px;font-size:12px;color:#8994a7">Recibido ${escape(new Date(lead.createdAt).toLocaleString("es-CO", { timeZone: "America/Bogota" }))} · El cliente autorizó ser contactado sobre esta solicitud.</p>
+    <p style="margin-top:20px;font-size:12px;color:#8994a7">Este correo también es el respaldo del lead: si no aparece en la bandeja por una falla de la base de datos, aquí están todos sus datos.</p>
+    <p style="margin-top:8px;font-size:12px;color:#8994a7">Recibido ${escape(new Date(lead.createdAt).toLocaleString("es-CO", { timeZone: "America/Bogota" }))} · El cliente autorizó ser contactado sobre esta solicitud.</p>
   </div>
 </div></body></html>`;
 

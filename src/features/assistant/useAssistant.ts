@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { assistantConfig } from "@/config/assistant";
-import { submitLead } from "@/features/leads/client";
+import { LEAD_SYNCED_EVENT, submitLead } from "@/features/leads/client";
 import { leadSubmissionResult, localBrain } from "./engine";
 import {
   initialConversationState,
@@ -109,7 +109,7 @@ export function useAssistant(brain: AssistantBrain = localBrain) {
         if (submission) {
           setStatus("sending");
           const result = await submitLead(submission.lead, [...current.messages, userMessage, ...turnMessages]);
-          const outcome = leadSubmissionResult(turn.state, result.ok);
+          const outcome = leadSubmissionResult(turn.state, result.ok ? { ok: true } : { ok: false, backup: result.backup });
           setSnapshot((s) => ({
             ...s,
             conversation: outcome.state,
@@ -118,15 +118,43 @@ export function useAssistant(brain: AssistantBrain = localBrain) {
           }));
         }
         setStatus("idle");
-      } catch {
+      } catch (error) {
+        // Modo degradado: si el asistente falla, la captación sigue (datos, llamada, WhatsApp).
+        console.error("[Jeipy AI] El asistente falló al responder:", error);
         setStatus("error");
-        appendAssistant([{ type: "text", text: "Tuve un problema al procesar tu mensaje. ¿Lo intentamos de nuevo?" }], [
-          "Reintentar",
-        ]);
+        appendAssistant(
+          [
+            {
+              type: "text",
+              text: "Estoy teniendo un problema técnico. Puedes intentarlo de nuevo o, para no perder tiempo, dejar tus datos aquí o escribirnos directamente:",
+            },
+            { type: "fallback-form" },
+            { type: "contact-links", whatsappMessage: "Hola Jeipy, quiero información sobre una página web para mi negocio." },
+          ],
+          ["Reintentar"],
+        );
       }
     },
     [appendAssistant, brain, status],
   );
+
+  // Un lead guardado en el navegador se registró en segundo plano: se confirma en el chat.
+  useEffect(() => {
+    const onSynced = (event: Event) => {
+      const { conversationId } = (event as CustomEvent<{ conversationId: string }>).detail ?? {};
+      const current = latest.current;
+      if (conversationId !== current.conversation.conversationId || current.conversation.leadCaptured) return;
+      const outcome = leadSubmissionResult(current.conversation, { ok: true });
+      setSnapshot((s) => ({
+        ...s,
+        conversation: outcome.state,
+        messages: [...s.messages, { id: createId(), role: "assistant", blocks: outcome.blocks }],
+        quickReplies: outcome.quickReplies ?? [],
+      }));
+    };
+    window.addEventListener(LEAD_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(LEAD_SYNCED_EVENT, onSynced);
+  }, []);
 
   const retry = useCallback(() => {
     setSnapshot((s) => ({ ...s, messages: s.messages.slice(0, -2) }));

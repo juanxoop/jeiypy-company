@@ -14,8 +14,9 @@ export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   interesado: "Interesado",
   cotizacion: "Cotización",
   "solicita-llamada": "Solicita llamada",
-  cerrado: "Cerrado",
-  "no-interesado": "No interesado",
+  "cerrado-ganado": "Cerrado - Ganado",
+  "cerrado-no-interesado": "Cerrado - No interesado",
+  "cerrado-sin-respuesta": "Cerrado - Sin respuesta",
 };
 
 export const LEAD_INTENT_LABEL: Record<LeadIntent, string> = {

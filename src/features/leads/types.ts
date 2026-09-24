@@ -8,9 +8,29 @@ import type { AiLevel, AiTierId, DigitalChannel, Feature, Goal, PlanId, WebsiteS
 export type LeadIntent = "quote" | "callback";
 
 /** Estado interno del lead para el equipo. Nunca se muestra al cliente. */
-export type LeadStatus = "nuevo" | "contactado" | "interesado" | "cotizacion" | "solicita-llamada" | "cerrado" | "no-interesado";
+export type LeadStatus =
+  | "nuevo"
+  | "contactado"
+  | "interesado"
+  | "cotizacion"
+  | "solicita-llamada"
+  | "cerrado-ganado"
+  | "cerrado-no-interesado"
+  | "cerrado-sin-respuesta";
 
-export const LEAD_STATUSES: LeadStatus[] = ["nuevo", "contactado", "interesado", "cotizacion", "solicita-llamada", "cerrado", "no-interesado"];
+export const LEAD_STATUSES: LeadStatus[] = [
+  "nuevo",
+  "contactado",
+  "interesado",
+  "cotizacion",
+  "solicita-llamada",
+  "cerrado-ganado",
+  "cerrado-no-interesado",
+  "cerrado-sin-respuesta",
+];
+
+/** Un lead cerrado sigue existiendo: cerrar solo cambia su estado. */
+export const isClosedStatus = (status: LeadStatus) => status.startsWith("cerrado-");
 
 export type ContactChannel = "whatsapp" | "llamada" | "correo";
 
@@ -45,6 +65,8 @@ export type LeadSubmission = {
   transcript?: TranscriptEntry[];
   /** Ya se había enviado un lead en esta conversación: la notificación se marca como actualización. */
   isUpdate?: boolean;
+  /** Reintento de un lead que ya llegó al equipo por el correo de respaldo: no se vuelve a enviar el correo. */
+  backupNotified?: boolean;
 };
 
 export type LeadRecord = Omit<LeadSubmission, "consent"> & {
@@ -60,10 +82,18 @@ export type LeadRecord = Omit<LeadSubmission, "consent"> & {
   userAgent?: string;
 };
 
-/** Respuesta de POST /api/leads. `ok` solo es true si la base de datos confirmó que el lead quedó guardado. */
+/**
+ * Respuesta de POST /api/leads. `ok` solo es true si la base de datos confirmó que el lead quedó guardado.
+ * `backup: "email"`: la base de datos falló, pero el lead llegó al equipo por el correo de respaldo.
+ */
 export type LeadSubmitResult =
   | { ok: true; id: string; notified: boolean }
-  | { ok: false; error: "invalid" | "rate-limited" | "not-configured" | "failed"; requestId?: string };
+  | {
+      ok: false;
+      error: "invalid" | "rate-limited" | "not-configured" | "failed";
+      requestId?: string;
+      backup?: "email" | "none";
+    };
 
 /** Lead tal como lo guarda la base de datos (lo que lee la bandeja /admin/leads). */
 export type LeadRow = {
@@ -95,6 +125,16 @@ export type LeadRow = {
   report: string;
   transcript?: TranscriptEntry[];
   consentAt: string;
+  closedAt?: string;
 };
 
-export type LeadNote = { id: string; createdAt: string; author?: string; body: string };
+/** Nota interna o evento del historial (cambio de estado). */
+export type LeadNote = {
+  id: string;
+  createdAt: string;
+  author?: string;
+  body: string;
+  kind: "note" | "status";
+  fromStatus?: LeadStatus;
+  toStatus?: LeadStatus;
+};

@@ -564,8 +564,8 @@ function submitLead(state: ConversationState, lead: MessageBlock[] = []): Reply 
  * Respuesta al resultado real del envío. Solo confirma la recepción si el backend
  * guardó o notificó el lead; si no, lo dice con honestidad y ofrece alternativas.
  */
-export function leadSubmissionResult(state: ConversationState, ok: boolean): AssistantTurn {
-  if (ok) {
+export function leadSubmissionResult(state: ConversationState, result: { ok: boolean; backup?: "email" | "none" }): AssistantTurn {
+  if (result.ok) {
     const next: ConversationState = { ...state, flow: "free", expecting: null, pendingSubmission: false, leadCaptured: true, handoffOffered: true };
     const whatsapp = isWhatsAppConfigured();
     return {
@@ -584,18 +584,19 @@ export function leadSubmissionResult(state: ConversationState, ok: boolean): Ass
       state: next,
     };
   }
-  const whatsapp = isWhatsAppConfigured();
+  // Sin éxito falso: nunca "Solicitud recibida" si la base de datos no lo confirmó.
+  const byEmail = result.backup === "email";
   return {
     blocks: [
       {
         type: "lead-status",
         ok: false,
-        title: "No pudimos enviar tu solicitud",
-        text: whatsapp
-          ? "Puedes intentarlo nuevamente o continuar por WhatsApp."
-          : "Puedes intentarlo nuevamente en unos minutos. Tus datos no se perdieron en esta conversación.",
+        title: byEmail ? "Tu solicitud llegó por un canal alternativo" : "No pudimos enviar tu solicitud",
+        text: byEmail
+          ? "Nuestro sistema principal tuvo una falla, pero tus datos llegaron al equipo por correo. Los guardé en este navegador y volveré a intentar registrarlos automáticamente. Si prefieres, continúa ahora por WhatsApp o llámanos."
+          : "Puedes intentarlo nuevamente o continuar por WhatsApp. Guardé tus datos en este navegador y volveré a intentar enviarlos automáticamente.",
       },
-      ...(whatsapp ? [{ ...closingBlock(state, "Continuar por WhatsApp"), offerCallback: false } as MessageBlock] : []),
+      { type: "contact-links", whatsappMessage: buildWhatsAppMessage(state) },
     ],
     quickReplies: ["Reintentar envío", "Tengo otra duda"],
     state: { ...state, flow: "free", expecting: null, pendingSubmission: true },

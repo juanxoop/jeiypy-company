@@ -43,6 +43,7 @@ export async function setLeadStatus(formData: FormData): Promise<void> {
   const status = String(formData.get("status") ?? "") as LeadStatus;
   if (!LEAD_STATUSES.includes(status)) throw new Error("Estado inválido.");
   await updateLeadStatus(id, status);
+  // Cerrar solo cambia el estado: el lead sigue en la base de datos y en el filtro "Cerrados".
   revalidatePath("/admin/leads");
   revalidatePath(`/admin/leads/${id}`);
 }
@@ -59,6 +60,7 @@ export async function addNote(_: FormState, formData: FormData): Promise<FormSta
     console.error("[admin] No se pudo guardar la nota:", error);
     return { error: "No se pudo guardar la nota. Inténtalo de nuevo." };
   }
+  revalidatePath("/admin/leads");
   revalidatePath(`/admin/leads/${id}`);
   return { ok: true };
 }

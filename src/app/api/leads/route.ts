@@ -9,6 +9,10 @@ import { validateLead } from "@/server/leads/validate";
  * Solo responde `ok: true` cuando Supabase confirmó la escritura. Los errores quedan en los
  * registros del servidor con un `requestId` que también recibe el navegador.
  */
+
+/** Reintentos contra Supabase + correo en paralelo: margen suficiente sin colgar al cliente. */
+export const maxDuration = 30;
+
 const json = (body: LeadSubmitResult, status: number) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 export async function POST(request: NextRequest) {
@@ -42,6 +46,8 @@ export async function POST(request: NextRequest) {
   }
 
   const result = await processLead(validation.lead, { userAgent: request.headers.get("user-agent") ?? undefined, requestId });
-  if (!result.ok) return json({ ok: false, error: result.reason, requestId }, result.reason === "not-configured" ? 503 : 502);
+  if (!result.ok) {
+    return json({ ok: false, error: result.reason, requestId, backup: result.backup }, result.reason === "not-configured" ? 503 : 502);
+  }
   return json({ ok: true, id: result.id, notified: result.notified }, 201);
 }

@@ -6,6 +6,7 @@ import { isWhatsAppConfigured, getContactHref } from "@/lib/contact";
 import { cn } from "@/lib/cn";
 import { getAiTier, getPlan } from "../knowledge";
 import type { MessageBlock } from "../types";
+import { ContactLinks, FallbackLeadForm } from "./Fallback";
 import { InlineBold, RichText } from "./RichText";
 
 export type BlockActions = {
@@ -64,6 +65,14 @@ function Block({ block, actions }: { block: MessageBlock; actions: BlockActions 
       return <ClosingOptions block={block} actions={actions} />;
     case "lead-status":
       return <LeadStatus block={block} />;
+    case "contact-links":
+      return <ContactLinks whatsappMessage={block.whatsappMessage} />;
+    case "fallback-form":
+      return (
+        <div className="rounded-2xl border border-line bg-white/[0.02] p-4">
+          <FallbackLeadForm />
+        </div>
+      );
     default:
       return null;
   }

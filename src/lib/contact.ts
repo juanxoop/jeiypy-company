@@ -15,6 +15,11 @@ export function getContactHref(message: string = contactConfig.defaultMessage): 
   return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
 }
 
+/** Enlace de llamada directa al equipo (`tel:`), o null si no hay teléfono configurado. */
+export function getCallHref(): string | null {
+  return contactConfig.phone ? `tel:+${contactConfig.phone}` : null;
+}
+
 export function isExternalHref(href: string): boolean {
   return /^https?:\/\//.test(href);
 }

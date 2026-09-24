@@ -20,6 +20,30 @@ export class LeadStoreError extends Error {
     super(message);
     this.name = "LeadStoreError";
   }
+  /** Fallas pasajeras que vale la pena reintentar (red, tiempo agotado, 5xx, 408, 429). */
+  get transient(): boolean {
+    return this.status === undefined || this.status >= 500 || this.status === 408 || this.status === 429;
+  }
+}
+
+/** Reintentos con espera creciente para escrituras críticas. */
+export const RETRY = { attempts: 3, timeoutMs: 4_000, backoffMs: [400, 1_200] } as const;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function withRetry<T>(label: string, run: () => Promise<T>, onRetry?: (attempt: number, error: unknown) => void): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= RETRY.attempts; attempt++) {
+    try {
+      return await run();
+    } catch (error) {
+      lastError = error;
+      const transient = !(error instanceof LeadStoreError) || error.transient;
+      if (!transient || attempt === RETRY.attempts) break;
+      onRetry?.(attempt, error);
+      await sleep(RETRY.backoffMs[attempt - 1] ?? 1_500);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new LeadStoreError(`${label}: ${String(lastError)}`);
 }
 
 type Row = Record<string, unknown>;
@@ -27,18 +51,24 @@ type Row = Record<string, unknown>;
 function client() {
   const { url, serviceRoleKey } = leadsConfig.supabase;
   if (!url || !serviceRoleKey) return null;
-  return async function request<T>(path: string, init: RequestInit & { prefer?: string } = {}): Promise<T> {
-    const response = await fetch(`${url}/rest/v1/${path}`, {
-      ...init,
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-        "Content-Type": "application/json",
-        ...(init.prefer ? { Prefer: init.prefer } : {}),
-      },
-      cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
-    });
+  return async function request<T>(path: string, init: RequestInit & { prefer?: string; timeoutMs?: number } = {}): Promise<T> {
+    let response: Response;
+    try {
+      response = await fetch(`${url}/rest/v1/${path}`, {
+        ...init,
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+          ...(init.prefer ? { Prefer: init.prefer } : {}),
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(init.timeoutMs ?? 8_000),
+      });
+    } catch (error) {
+      // Red caída o tiempo agotado: se trata como falla pasajera (sin código HTTP).
+      throw new LeadStoreError(`Supabase no respondió: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const body = await response.text();
     if (!response.ok) throw new LeadStoreError(`Supabase ${response.status}: ${body.slice(0, 400)}`, response.status);
     return (body ? JSON.parse(body) : null) as T;
@@ -79,6 +109,7 @@ function toRow(r: Row): LeadRow {
     report: String(r.report ?? ""),
     transcript: opt(r.transcript),
     consentAt: String(r.consent_at),
+    closedAt: opt(r.closed_at),
   };
 }
 
@@ -111,6 +142,7 @@ function fromRecord(lead: LeadRecord): Row {
     report: lead.report,
     transcript: lead.transcript ?? null,
     consent_at: lead.consentAt,
+    status_changed_by: "Jeipy AI (solicitud del cliente)",
     source: lead.source,
     user_agent: lead.userAgent ?? null,
   };
@@ -126,19 +158,27 @@ function requireClient() {
  * Guarda o actualiza el lead de una conversación y devuelve la fila que quedó en la base de datos.
  * Si Supabase no devuelve la fila, se considera que no se guardó.
  */
-export async function saveLead(lead: LeadRecord): Promise<LeadRow> {
+export async function saveLead(lead: LeadRecord, onRetry?: (attempt: number, error: unknown) => void): Promise<LeadRow> {
   const request = requireClient();
-  const rows = await request<Row[]>(`${TABLE}?on_conflict=conversation_id`, {
-    method: "POST",
-    prefer: "resolution=merge-duplicates,return=representation",
-    body: JSON.stringify(fromRecord(lead)),
-  });
-  if (!Array.isArray(rows) || !rows[0]?.id) throw new LeadStoreError("Supabase no confirmó la escritura del lead.");
-  return toRow(rows[0]);
+  // Reintentar es seguro: la escritura es un upsert por conversation_id (no duplica leads).
+  return withRetry(
+    "saveLead",
+    async () => {
+      const rows = await request<Row[]>(`${TABLE}?on_conflict=conversation_id`, {
+        method: "POST",
+        prefer: "resolution=merge-duplicates,return=representation",
+        body: JSON.stringify(fromRecord(lead)),
+        timeoutMs: RETRY.timeoutMs,
+      });
+      if (!Array.isArray(rows) || !rows[0]?.id) throw new LeadStoreError("Supabase no confirmó la escritura del lead.", 502);
+      return toRow(rows[0]);
+    },
+    onRetry,
+  );
 }
 
 const LIST_COLUMNS =
-  "id,created_at,updated_at,status,intent,name,phone,email,business_name,business_type,business_description,digital_channels,website_status,goal,needs,features,ai_interest,ai_level,recommended_plan,recommended_ai,budget,callback_requested,preferred_time,preferred_channel,summary,report,consent_at";
+  "closed_at,id,created_at,updated_at,status,intent,name,phone,email,business_name,business_type,business_description,digital_channels,website_status,goal,needs,features,ai_interest,ai_level,recommended_plan,recommended_ai,budget,callback_requested,preferred_time,preferred_channel,summary,report,consent_at";
 
 export async function listLeads(limit = 500): Promise<LeadRow[]> {
   const request = requireClient();
@@ -150,26 +190,30 @@ export async function getLead(id: string): Promise<{ lead: LeadRow; notes: LeadN
   if (!UUID.test(id)) return null;
   const request = requireClient();
   const rows = await request<Row[]>(
-    `${TABLE}?id=eq.${id}&select=*,${NOTES}(id,created_at,author,body)&${NOTES}.order=created_at.desc`,
+    `${TABLE}?id=eq.${id}&select=*,${NOTES}(id,created_at,author,body,kind,from_status,to_status)&${NOTES}.order=created_at.desc`,
   );
   const row = rows[0];
   if (!row) return null;
-  const notes = ((row[NOTES] as Row[]) ?? []).map((n) => ({
+  const notes: LeadNote[] = ((row[NOTES] as Row[]) ?? []).map((n) => ({
     id: String(n.id),
     createdAt: String(n.created_at),
     author: opt<string>(n.author),
     body: String(n.body),
+    kind: n.kind === "status" ? "status" : "note",
+    fromStatus: opt<LeadStatus>(n.from_status),
+    toStatus: opt<LeadStatus>(n.to_status),
   }));
   return { lead: toRow(row), notes };
 }
 
-export async function updateLeadStatus(id: string, status: LeadStatus): Promise<void> {
+/** Cambia el estado. El historial (estado anterior → nuevo) lo registra la base de datos. Nunca borra. */
+export async function updateLeadStatus(id: string, status: LeadStatus, author = "Equipo Jeipy"): Promise<void> {
   if (!UUID.test(id)) throw new LeadStoreError("Id de lead inválido.");
   const request = requireClient();
   const rows = await request<Row[]>(`${TABLE}?id=eq.${id}`, {
     method: "PATCH",
     prefer: "return=representation",
-    body: JSON.stringify({ status, status_changed_at: new Date().toISOString() }),
+    body: JSON.stringify({ status, status_changed_by: author }),
   });
   if (!rows.length) throw new LeadStoreError("El lead no existe.");
 }
@@ -180,9 +224,31 @@ export async function addLeadNote(id: string, body: string, author?: string): Pr
   const rows = await request<Row[]>(NOTES, {
     method: "POST",
     prefer: "return=representation",
-    body: JSON.stringify({ lead_id: id, body, author: author ?? null }),
+    body: JSON.stringify({ lead_id: id, body, author: author ?? null, kind: "note" }),
   });
   if (!rows.length) throw new LeadStoreError("Supabase no confirmó la nota.");
+}
+
+/**
+ * Escritura de prueba no destructiva: sobrescribe una única fila de `lead_system_health`.
+ * Confirma que el servidor puede escribir en Supabase sin tocar leads reales.
+ */
+export async function storeWriteCheck(): Promise<{ ok: true; latencyMs: number } | { ok: false; reason: string }> {
+  const request = client();
+  if (!request) return { ok: false, reason: "Supabase no está configurado." };
+  const started = Date.now();
+  try {
+    const rows = await request<Row[]>("lead_system_health?on_conflict=id", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=representation",
+      body: JSON.stringify({ id: "write-check", checked_at: new Date().toISOString() }),
+      timeoutMs: RETRY.timeoutMs,
+    });
+    if (!rows.length) return { ok: false, reason: "Supabase no confirmó la escritura de prueba." };
+    return { ok: true, latencyMs: Date.now() - started };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** Diagnóstico para la bandeja: ¿hay conexión y existen las tablas? */
@@ -190,8 +256,9 @@ export async function storeHealth(): Promise<{ ok: true } | { ok: false; reason:
   const request = client();
   if (!request) return { ok: false, reason: "Faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY en las variables de entorno." };
   try {
-    await request(`${TABLE}?select=id,digital_channels,business_description&limit=1`);
-    await request(`${NOTES}?select=id&limit=1`);
+    await request(`${TABLE}?select=id,digital_channels,business_description,closed_at&limit=1`);
+    await request(`${NOTES}?select=id,kind&limit=1`);
+    await request("lead_system_health?select=id&limit=1");
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

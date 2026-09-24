@@ -151,7 +151,11 @@ export type MessageBlock =
   /** "¿Cómo quieres continuar?": asesor por WhatsApp, solicitud de llamada y otra duda. */
   | { type: "closing"; title: string; whatsappMessage: string; offerCallback: boolean }
   /** Resultado real del envío del lead al backend. */
-  | { type: "lead-status"; ok: boolean; title: string; text: string };
+  | { type: "lead-status"; ok: boolean; title: string; text: string }
+  /** Contacto directo con el equipo sin depender del backend: WhatsApp y llamada. */
+  | { type: "contact-links"; whatsappMessage: string }
+  /** Modo degradado: formulario mínimo para dejar datos si el asistente falla. */
+  | { type: "fallback-form" };
 
 export type ChatMessage =
   | { id: string; role: "user"; text: string }
