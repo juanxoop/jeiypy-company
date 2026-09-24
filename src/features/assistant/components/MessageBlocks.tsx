@@ -1,21 +1,18 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
 import { ArrowIcon } from "@/components/icons/ArrowIcon";
 import { CheckIcon, ChannelIcon } from "@/components/icons/BrandIcons";
 import { isWhatsAppConfigured, getContactHref } from "@/lib/contact";
 import { cn } from "@/lib/cn";
 import { getPlan } from "../knowledge";
 import type { HandoffAction, MessageBlock } from "../types";
-import type { LeadData } from "../useAssistant";
 import { InlineBold, RichText } from "./RichText";
 
 export type BlockActions = {
   onSend: (text: string) => void;
-  onRequestLead: () => void;
-  onSubmitLead: (lead: LeadData) => void;
   onNavigate: (href: string) => void;
-  leadSent: boolean;
+  /** Ya se registró un lead en esta conversación. */
+  leadCaptured: boolean;
 };
 
 export function MessageBlocks({ blocks, actions }: { blocks: MessageBlock[]; actions: BlockActions }) {
@@ -67,8 +64,6 @@ function Block({ block, actions }: { block: MessageBlock; actions: BlockActions 
       );
     case "handoff":
       return <HandoffOptions actionsList={block.actions} whatsappMessage={block.whatsappMessage} actions={actions} />;
-    case "lead-form":
-      return <LeadForm actions={actions} />;
   }
 }
 
@@ -136,6 +131,17 @@ function RecommendationCard({
             <ArrowIcon className="size-3.5" />
           </button>
         </div>
+        {isWhatsAppConfigured() && (
+          <a
+            href={getContactHref(`Hola Jeipy, me interesa el plan ${plan.name}.`)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 text-[12px] text-mist transition-colors hover:text-snow"
+          >
+            <ChannelIcon name="whatsapp" className="size-3.5" />
+            O continúa por WhatsApp
+          </a>
+        )}
       </div>
     </div>
   );
@@ -158,10 +164,16 @@ function HandoffOptions({
       {actionsList.map((action) => {
         if (action === "lead") {
           return (
-            <button key={action} type="button" disabled={actions.leadSent} onClick={actions.onRequestLead} className={cn(option, "disabled:opacity-50")}>
+            <button
+              key={action}
+              type="button"
+              disabled={actions.leadCaptured}
+              onClick={() => actions.onSend("Quiero dejar mis datos")}
+              className={cn(option, "disabled:opacity-50")}
+            >
               <span>
-                <span className="block font-medium">{actions.leadSent ? "Datos enviados" : "Dejar mis datos"}</span>
-                <span className="block text-xs text-mist">Te contactamos con el resumen de esta conversación</span>
+                <span className="block font-medium">{actions.leadCaptured ? "Datos registrados" : "Dejar mis datos"}</span>
+                <span className="block text-xs text-mist">El equipo te contacta con el resumen de esta conversación</span>
               </span>
               <ArrowIcon className="size-4 text-mist" />
             </button>
@@ -192,81 +204,5 @@ function HandoffOptions({
         );
       })}
     </div>
-  );
-}
-
-function LeadForm({ actions }: { actions: BlockActions }) {
-  const id = useId();
-  const [values, setValues] = useState<LeadData>({ name: "", contact: "", note: "" });
-  const [error, setError] = useState<string | null>(null);
-
-  if (actions.leadSent) {
-    return <p className="text-xs text-mist">Formulario enviado.</p>;
-  }
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const contact = values.contact.trim();
-    const validContact = /^\+?[\d\s-]{7,}$/.test(contact) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact);
-    if (values.name.trim().length < 2) return setError("Escribe tu nombre.");
-    if (!validContact) return setError("Escribe un número de WhatsApp o un correo válido.");
-    setError(null);
-    actions.onSubmitLead({ name: values.name.trim(), contact, note: values.note.trim() });
-  };
-
-  const field =
-    "w-full rounded-xl border border-line-strong bg-ink/60 px-3.5 py-2.5 text-[13.5px] text-snow placeholder:text-mist/60 transition-colors focus:border-glow/50 focus:outline-none";
-
-  return (
-    <form onSubmit={submit} noValidate className="space-y-2.5 rounded-2xl border border-line bg-white/[0.02] p-4">
-      <div>
-        <label htmlFor={`${id}-name`} className="mb-1 block text-xs text-mist">
-          Nombre
-        </label>
-        <input
-          id={`${id}-name`}
-          autoComplete="name"
-          value={values.name}
-          onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
-          className={field}
-        />
-      </div>
-      <div>
-        <label htmlFor={`${id}-contact`} className="mb-1 block text-xs text-mist">
-          WhatsApp o correo
-        </label>
-        <input
-          id={`${id}-contact`}
-          autoComplete="tel"
-          value={values.contact}
-          onChange={(e) => setValues((v) => ({ ...v, contact: e.target.value }))}
-          className={field}
-        />
-      </div>
-      <div>
-        <label htmlFor={`${id}-note`} className="mb-1 block text-xs text-mist">
-          Algo más que debamos saber <span className="text-mist/60">(opcional)</span>
-        </label>
-        <textarea
-          id={`${id}-note`}
-          rows={2}
-          value={values.note}
-          onChange={(e) => setValues((v) => ({ ...v, note: e.target.value }))}
-          className={cn(field, "resize-none")}
-        />
-      </div>
-      {error && (
-        <p role="alert" className="text-xs text-[#ff9b9b]">
-          {error}
-        </p>
-      )}
-      <button
-        type="submit"
-        className="group inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-jeipy text-[13.5px] font-medium text-white transition-colors hover:bg-[#2a76ff]"
-      >
-        Enviar datos
-        <ArrowIcon className="size-3.5" />
-      </button>
-    </form>
   );
 }

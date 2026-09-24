@@ -21,6 +21,9 @@ export type Profile = {
   goal?: Goal;
   features: FeatureMap;
   budget?: Budget;
+  /** Datos de contacto, solo si el visitante decide dejarlos. */
+  name?: string;
+  contact?: string;
 };
 
 /* ---------------------------------------------------------------
@@ -33,9 +36,17 @@ export type Slot =
   | { kind: "website" }
   | { kind: "goal" }
   | { kind: "feature"; feature: Feature }
-  | { kind: "budget" };
+  | { kind: "budget" }
+  | { kind: "name" }
+  | { kind: "contact" }
+  /** Confirmación de un plan alternativo propuesto ante una objeción. */
+  | { kind: "confirm-plan"; planId: PlanId };
 
-export type Flow = "free" | "advisor" | "quote";
+/**
+ * free: conversación abierta · advisor: diagnóstico para recomendar ·
+ * quote: diagnóstico + presupuesto + datos de contacto · lead: solo datos de contacto.
+ */
+export type Flow = "free" | "advisor" | "quote" | "lead";
 
 export type ConversationState = {
   flow: Flow;
@@ -48,6 +59,8 @@ export type ConversationState = {
   skipped: string[];
   /** Intentos fallidos de entender la respuesta a la pregunta actual. */
   retries: number;
+  /** Ya se registró un lead en esta conversación. */
+  leadCaptured: boolean;
 };
 
 export type HandoffAction = "whatsapp" | "lead" | "contact-section";
@@ -63,17 +76,30 @@ export type MessageBlock =
       notes?: string[];
     }
   | { type: "summary"; title: string; rows: { label: string; value: string }[] }
-  | { type: "handoff"; actions: HandoffAction[]; whatsappMessage: string }
-  | { type: "lead-form" };
+  | { type: "handoff"; actions: HandoffAction[]; whatsappMessage: string };
 
 export type ChatMessage =
   | { id: string; role: "user"; text: string }
   | { id: string; role: "assistant"; blocks: MessageBlock[] };
 
+/** Registro comercial generado al cerrar una cotización o captura de datos. */
+export type Lead = {
+  name: string;
+  contact: string;
+  /** Resumen interno de una línea para el equipo comercial. */
+  summary: string;
+  profile: Profile;
+  plan?: PlanId;
+};
+
+/** Efectos que el motor pide ejecutar fuera de la conversación (guardar, notificar…). */
+export type AssistantEffect = { type: "lead-captured"; lead: Lead };
+
 export type AssistantTurn = {
   blocks: MessageBlock[];
   quickReplies?: string[];
   state: ConversationState;
+  effects?: AssistantEffect[];
 };
 
 /**
@@ -91,4 +117,5 @@ export const initialConversationState = (): ConversationState => ({
   handoffOffered: false,
   skipped: [],
   retries: 0,
+  leadCaptured: false,
 });

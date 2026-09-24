@@ -6,6 +6,7 @@ import { localBrain } from "./engine";
 import {
   initialConversationState,
   type AssistantBrain,
+  type AssistantEffect,
   type ChatMessage,
   type ConversationState,
   type MessageBlock,
@@ -19,13 +20,10 @@ import {
  */
 export type AssistantStatus = "idle" | "thinking" | "error";
 
-export type LeadData = { name: string; contact: string; note: string };
-
 type Snapshot = {
   messages: ChatMessage[];
   quickReplies: string[];
   conversation: ConversationState;
-  leadSent: boolean;
 };
 
 const STORAGE_KEY = "jeipy-ai:conversation";
@@ -37,8 +35,26 @@ const emptySnapshot = (): Snapshot => ({
   messages: [],
   quickReplies: [...assistantConfig.suggestions],
   conversation: initialConversationState(),
-  leadSent: false,
 });
+
+const LEADS_KEY = "jeipy-ai:leads";
+
+/**
+ * Ejecuta los efectos del motor. En modo prototipo los leads se guardan solo en este navegador;
+ * al conectar el backend, aquí se enviarán al CRM, correo o base de datos.
+ */
+function runEffects(effects: AssistantEffect[] = []) {
+  for (const effect of effects) {
+    if (effect.type === "lead-captured") {
+      try {
+        const stored = JSON.parse(localStorage.getItem(LEADS_KEY) ?? "[]") as unknown[];
+        localStorage.setItem(LEADS_KEY, JSON.stringify([...stored, { ...effect.lead, at: new Date().toISOString() }]));
+      } catch {
+        /* sin almacenamiento local disponible */
+      }
+    }
+  }
+}
 
 function loadSnapshot(): Snapshot {
   try {
@@ -96,6 +112,7 @@ export function useAssistant(brain: AssistantBrain = localBrain) {
           brain.reply(input, current.conversation, current.messages),
           wait(thinkingTime(input)),
         ]);
+        runEffects(turn.effects);
         setSnapshot((s) => ({
           ...s,
           conversation: turn.state,
@@ -125,52 +142,13 @@ export function useAssistant(brain: AssistantBrain = localBrain) {
     setStatus("idle");
   }, []);
 
-  /** Muestra el formulario de contacto dentro de la conversación. */
-  const requestLeadForm = useCallback(() => {
-    appendAssistant(
-      [
-        { type: "text", text: "Perfecto. Déjame tus datos y una persona del equipo te contactará con el contexto de esta conversación." },
-        { type: "lead-form" },
-      ],
-      [],
-    );
-  }, [appendAssistant]);
-
-  const submitLead = useCallback(
-    (lead: LeadData) => {
-      const record = { ...lead, profile: snapshot.conversation.profile, plan: snapshot.conversation.recommended, at: new Date().toISOString() };
-      try {
-        const stored = JSON.parse(localStorage.getItem("jeipy-ai:leads") ?? "[]") as unknown[];
-        localStorage.setItem("jeipy-ai:leads", JSON.stringify([...stored, record]));
-      } catch {
-        /* sin almacenamiento local disponible */
-      }
-      setSnapshot((s) => ({ ...s, leadSent: true }));
-      appendAssistant(
-        [
-          {
-            type: "text",
-            text: assistantConfig.prototype
-              ? `¡Gracias, ${lead.name.split(" ")[0]}! Guardé tus datos y el resumen de tu proyecto.\n\n**Modo prototipo:** por ahora los datos no se envían al equipo. Cuando conectemos el sistema, llegarán automáticamente.`
-              : `¡Gracias, ${lead.name.split(" ")[0]}! Una persona del equipo te contactará pronto con el contexto de esta conversación.`,
-          },
-        ],
-        ["Tengo otra duda"],
-      );
-    },
-    [appendAssistant, snapshot.conversation],
-  );
-
   return {
     messages: snapshot.messages,
     quickReplies: snapshot.quickReplies,
     conversation: snapshot.conversation,
-    leadSent: snapshot.leadSent,
     status,
     send,
     retry,
     reset,
-    requestLeadForm,
-    submitLead,
   };
 }

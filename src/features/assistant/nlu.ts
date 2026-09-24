@@ -29,9 +29,16 @@ export function isQuestion(raw: string): boolean {
 
 export type Intent =
   | { type: "human" }
+  | { type: "lead" }
+  | { type: "advance" }
   | { type: "quote" }
   | { type: "recommend" }
+  | { type: "which-best" }
+  | { type: "unsure" }
   | { type: "digitalize" }
+  | { type: "objection-price" }
+  | { type: "think-later" }
+  | { type: "guarantee" }
   | { type: "ai-info" }
   | { type: "plan-info"; planId: PlanId }
   | { type: "compare" }
@@ -51,12 +58,29 @@ export function detectIntent(raw: string): Intent | null {
   const t = normalize(raw);
 
   if (has(t, " empezar de nuevo", " reiniciar", " nueva conversacion")) return { type: "restart" };
+
+  // Atención humana: pedirla de forma explícita. Mencionar WhatsApp como canal del negocio no cuenta.
   if (
-    has(t, " asesor", " humano", " una persona", " alguien del equipo", " hablar con alguien", " whatsapp", " llamar", " llamada", " agente")
+    has(t, " asesor", " humano", " una persona", " alguien del equipo", " hablar con alguien", " agente", " llamar", " llamada") ||
+    /(hablar|escribir|continuar|seguir|contactar|pasar|pasame|numero de|su|tu) (por |al |de )?whatsapp/.test(t)
   ) {
-    // "Integración con WhatsApp" es una función, no una petición de contacto.
-    if (!has(t, " integracion", " boton de whatsapp", " conectado a whatsapp", " paso a whatsapp")) return { type: "human" };
+    return { type: "human" };
   }
+  if (has(t, " dejar mis datos", " dejo mis datos", " que me contacten", " contactenme", " me pueden contactar", " llamenme", " escribanme"))
+    return { type: "lead" };
+  if (has(t, " quiero avanzar", " quiero contratar", " quiero empezar", " quiero arrancar", " empecemos", " vamos con", " lo quiero", " me lo llevo", " quiero ese plan"))
+    return { type: "advance" };
+
+  if (has(t, " caro", " costoso", " muy alto", " no me alcanza", " no tengo tanto", " sale mucho", " mucha plata", " mucho dinero", " fuera de mi presupuesto", " mas barato", " economico"))
+    return { type: "objection-price" };
+  if (has(t, " lo voy a pensar", " lo pienso", " lo pensare", " mas adelante lo", " despues te escribo", " luego te aviso", " todavia no estoy listo"))
+    return { type: "think-later" };
+  if (has(t, " garantiz", " garantia", " aseguran", " seguro que", " resultados seguros", " prometen"))
+    return { type: "guarantee" };
+  if (has(t, " no se que necesito", " no se que plan", " no estoy seguro de que", " no tengo claro", " no se por donde", " no se que quiero"))
+    return { type: "unsure" };
+  if (has(t, " cual es mejor", " cual es el mejor", " que plan es mejor", " cual recomiendan", " cual me recomiendas")) return { type: "which-best" };
+
   if (has(t, " cotiz", " cotizacion", " presupuesto para", " cuanto me cuesta", " cuanto costaria", " cuanto vale una", " cuanto cuesta una"))
     return { type: "quote" };
   if (has(t, " que plan", " cual plan", " me conviene", " recomiend", " cual me sirve", " cual elijo", " ayudame a elegir", " que me sirve"))
@@ -170,9 +194,9 @@ export function extractBusinessType(raw: string, { loose = false } = {}): string
 
 export function extractWebsite(raw: string, { direct = false } = {}): WebsiteStatus | undefined {
   const t = normalize(raw);
-  if (has(t, " solo redes", " solo instagram", " solo facebook", " solo tengo instagram", " solo tengo facebook", " redes sociales"))
+  if (has(t, " solo redes", " solo instagram", " solo facebook", " solo whatsapp", " solo tengo instagram", " solo tengo facebook", " redes sociales", " redes y whatsapp", " manejo redes"))
     return "social";
-  if (has(t, " no tengo pagina", " no tengo web", " no tengo sitio", " sin pagina", " sin web", " todavia no tengo", " aun no tengo"))
+  if (has(t, " no tengo pagina", " no tengo web", " no tengo sitio", " sin pagina", " sin web", " todavia no tengo", " aun no tengo", " no tengo nada"))
     return "no";
   if (has(t, " ya tengo pagina", " ya tengo web", " ya tengo una pagina", " ya tengo un sitio", " tengo pagina", " tengo una pagina web", " tengo web"))
     return "yes";
@@ -248,4 +272,35 @@ export function enrichProfile(profile: Profile, raw: string): Profile {
     if (next.features[feature] === undefined) next.features[feature] = value;
   }
   return next;
+}
+
+/* ---------------------------------------------------------------
+   Datos de contacto (solo durante la captura de un lead)
+   --------------------------------------------------------------- */
+
+const capitalizeWords = (value: string) =>
+  value
+    .toLowerCase()
+    .split(" ")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+
+export function extractName(raw: string): string | undefined {
+  const clean = raw.trim().replace(/[.!¡¿?,]/g, "");
+  const explicit = clean.match(/(?:me llamo|mi nombre es|soy)\s+([a-záéíóúñü]+(?:\s+[a-záéíóúñü]+){0,3})/i);
+  if (explicit) return capitalizeWords(explicit[1]);
+  if (/^[a-záéíóúñü]+(?:\s+[a-záéíóúñü]+){0,3}$/i.test(clean) && !parseYesNo(clean) && !isQuestion(raw)) return capitalizeWords(clean);
+  return undefined;
+}
+
+export function extractContact(raw: string): string | undefined {
+  const email = raw.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
+  if (email) return email[0].toLowerCase();
+  const phone = raw.match(/\+?\d[\d\s-]{6,}\d/);
+  if (phone) return phone[0].replace(/\s+/g, " ").trim();
+  return undefined;
+}
+
+export function declines(raw: string): boolean {
+  return /^ (no|prefiero no|mejor no|no gracias|ahora no|despues|luego)\b/.test(normalize(raw));
 }

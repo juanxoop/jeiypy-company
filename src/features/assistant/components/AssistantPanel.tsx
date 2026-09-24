@@ -15,7 +15,7 @@ type AssistantPanelProps = {
 
 export function AssistantPanel({ onClose }: AssistantPanelProps) {
   const assistant = useAssistant();
-  const { messages, quickReplies, status, leadSent } = assistant;
+  const { messages, quickReplies, status, conversation } = assistant;
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -48,13 +48,11 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
 
   const blockActions: BlockActions = {
     onSend: send,
-    onRequestLead: assistant.requestLeadForm,
-    onSubmitLead: assistant.submitLead,
     onNavigate: (href) => {
       onClose();
       document.querySelector(href)?.scrollIntoView({ behavior: "smooth" });
     },
-    leadSent,
+    leadCaptured: conversation.leadCaptured,
   };
 
   return (
