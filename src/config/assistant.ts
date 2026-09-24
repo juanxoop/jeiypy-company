@@ -11,9 +11,9 @@ export const assistantConfig = {
   thinkingDelay: { base: 450, perCharacter: 4, max: 1400 },
   suggestions: [
     "¿Qué plan me conviene?",
-    "Quiero cotizar una página",
-    "¿Qué puede hacer Jeipy AI?",
-    "Tengo un negocio y quiero digitalizarlo",
+    "Quiero digitalizar mi negocio",
+    "¿Qué incluye cada plan?",
+    "Quiero automatizar mi negocio",
   ],
   launcherHint: "¿Te ayudo a elegir?",
 } as const;

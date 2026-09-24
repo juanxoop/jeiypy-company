@@ -97,7 +97,12 @@ La conversación se conserva al cerrar el panel y al recargar la página, dentro
 - **Widget cerrado:** abajo a la derecha, con un anillo de pulso muy sutil. Al pasar el cursor aparece la etiqueta "Jeipy AI · ¿Te ayudo a elegir?".
 - **Panel abierto:**
   - **Cabecera:** orbe, "Jeipy AI", la etiqueta "Prototipo", el estado "Asistente inteligente" y los botones de reiniciar y cerrar.
-  - **Bienvenida:** el orbe y cuatro sugerencias iniciales.
+  - **Bienvenida:** el orbe y cuatro sugerencias iniciales, cada una abre una conversación consultiva:
+    - "¿Qué plan me conviene?" → diagnóstico.
+    - "Quiero digitalizar mi negocio" → diagnóstico.
+    - "¿Qué incluye cada plan?" → resumen de los tres planes y de Jeipy AI, y luego diagnóstico.
+    - "Quiero automatizar mi negocio" → diagnóstico enfocado en el nivel de automatización (termina con la pregunta de desempate si hace falta).
+  - **Sin objeciones sugeridas:** ninguna sugerencia plantea el precio como problema. Si el visitante escribe "está muy caro", el asistente maneja la objeción igual.
   - **Conversación:** mensajes del visitante en azul y respuestas del asistente con texto, listas y tarjetas de recomendación, resumen, contacto y formulario.
   - **Sugerencias rápidas** tras cada respuesta, que continúan la conversación dentro del asistente.
   - **Campo de texto:** Enter envía y Mayús+Enter hace salto de línea.

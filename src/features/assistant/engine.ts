@@ -53,9 +53,9 @@ const text = (value: string): MessageBlock => ({ type: "text", text: value });
 const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 const CHIPS = {
-  start: ["¿Qué plan me conviene?", "Quiero cotizar una página", "¿Qué puede hacer Jeipy AI?", "Tengo un negocio y quiero digitalizarlo"],
+  start: [...assistantConfig.suggestions],
   afterInfo: ["¿Qué plan me conviene?", "Quiero cotizar una página"],
-  afterRecommendation: ["Quiero avanzar", "¿Qué incluye exactamente?", "Me parece caro"],
+  afterRecommendation: ["Quiero avanzar", "¿Qué incluye exactamente?", "Comparar planes"],
   fallback: ["¿Qué plan me conviene?", "Ver precios", "Hablar con una persona"],
 };
 
@@ -414,8 +414,25 @@ function advance(state: ConversationState, lead: MessageBlock[] = []): Reply {
   return { blocks: [...lead, ...q.blocks], quickReplies: q.quickReplies, state: { ...state, expecting: slot, retries: 0 } };
 }
 
-const startFlow = (flow: ConversationState["flow"], state: ConversationState, intro: string): Reply =>
-  advance({ ...state, flow }, intro ? [text(intro)] : []);
+const startFlow = (flow: ConversationState["flow"], state: ConversationState, intro: string, lead: MessageBlock[] = []): Reply =>
+  advance({ ...state, flow }, [...lead, ...(intro ? [text(intro)] : [])]);
+
+/** "Diseño responsive" → "diseño responsive"; respeta siglas como "SEO". */
+const lowerFirst = (value: string) => (/^[A-ZÁÉÍÓÚÑ]{2}/.test(value) ? value : value.charAt(0).toLowerCase() + value.slice(1));
+
+/** Resumen de lo que incluye cada plan, seguido de una invitación a encontrar el adecuado. */
+function plansOverview(): MessageBlock[] {
+  return [
+    text("Así se diferencian los planes:"),
+    {
+      type: "list",
+      items: knowledge.plans.map((p) => `**${p.name}** (desde ${p.price}): ${p.features.slice(0, 5).map(lowerFirst).join(", ")}.`),
+    },
+    text(
+      "Jeipy AI se suma desde Esencial como una opción ligera (responder dudas y captar datos), y en Premium va integrado con automatización más avanzada. Para decirte cuál encaja contigo, cuéntame un poco de tu negocio.",
+    ),
+  ];
+}
 
 /* ---------------------------------------------------------------
    Conocimiento, objeciones y dudas
@@ -429,7 +446,7 @@ function planInfo(planId: PlanId, state: ConversationState): Reply {
       { type: "list", items: plan.features },
       text(`${capitalize(aiAvailability(plan))}. ${knowledge.priceNote}`),
     ],
-    quickReplies: state.recommended === planId ? ["Quiero avanzar", "Me parece caro"] : ["¿Me conviene este plan?", "Comparar planes"],
+    quickReplies: state.recommended === planId ? ["Quiero avanzar", "Comparar planes"] : ["¿Me conviene este plan?", "Comparar planes"],
     state,
   };
 }
@@ -688,7 +705,7 @@ export function respond(input: string, current: ConversationState): Reply {
   }
 
   // 3. Referencias al plan ya recomendado.
-  if (current.recommended && (t.includes(" ese plan") || t.includes(" que incluye") || t.includes(" incluye exactamente"))) {
+  if (current.recommended && intent?.type !== "plans-overview" && (t.includes(" ese plan") || t.includes(" que incluye") || t.includes(" incluye exactamente"))) {
     return planInfo(current.recommended, current);
   }
 
@@ -698,6 +715,14 @@ export function respond(input: string, current: ConversationState): Reply {
   const withProfile = { ...current, profile: enriched };
 
   switch (intent?.type) {
+    case "plans-overview":
+      return startFlow("advisor", withProfile, "", plansOverview());
+    case "automate":
+      return startFlow(
+        "advisor",
+        { ...withProfile, profile: { ...enriched, goal: enriched.goal ?? "automate", features: { ...enriched.features, ai: true } } },
+        "Buena decisión. Automatizar puede ir desde responder preguntas frecuentes hasta gestionar reservas o procesos completos. Para recomendarte el nivel correcto, primero quiero entender tu negocio.",
+      );
     case "quote":
       return startFlow(
         "quote",

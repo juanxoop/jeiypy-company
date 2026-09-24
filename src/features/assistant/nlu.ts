@@ -33,6 +33,8 @@ export type Intent =
   | { type: "advance" }
   | { type: "quote" }
   | { type: "recommend" }
+  | { type: "plans-overview" }
+  | { type: "automate" }
   | { type: "which-best" }
   | { type: "unsure" }
   | { type: "digitalize" }
@@ -83,6 +85,9 @@ export function detectIntent(raw: string): Intent | null {
 
   if (has(t, " cotiz", " cotizacion", " presupuesto para", " cuanto me cuesta", " cuanto costaria", " cuanto vale una", " cuanto cuesta una"))
     return { type: "quote" };
+  if (has(t, " que incluye cada", " que incluyen los planes", " que trae cada plan", " que tiene cada plan", " que ofrece cada plan"))
+    return { type: "plans-overview" };
+  if (has(t, " quiero automatizar", " automatizar mi negocio", " automatizar el negocio", " automatizar mi empresa")) return { type: "automate" };
   if (has(t, " que plan", " cual plan", " me conviene", " recomiend", " cual me sirve", " cual elijo", " ayudame a elegir", " que me sirve"))
     return { type: "recommend" };
   if (has(t, " digitaliz", " tengo un negocio", " tengo una empresa", " tengo un emprendimiento")) return { type: "digitalize" };
