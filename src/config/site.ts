@@ -43,10 +43,11 @@ export const siteConfig = {
  * Contacto.
  * `whatsappNumber`: formato internacional sin "+", espacios ni guiones.
  * Ejemplo de formato para Colombia: "57" + número de 10 dígitos.
+ * Se configura con la variable NEXT_PUBLIC_WHATSAPP_NUMBER (ver .env.example).
  * Mientras esté vacío, los botones de contacto llevan a la sección #contacto.
  */
 export const contactConfig = {
-  whatsappNumber: "",
+  whatsappNumber: (process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "").replace(/\D/g, ""),
   defaultMessage: "Hola Jeipy, quiero digitalizar mi negocio.",
   fallbackHref: "#contacto",
 } as const;

@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { assistantConfig } from "@/config/assistant";
-import { localBrain } from "./engine";
+import { submitLead } from "@/features/leads/client";
+import { leadSubmissionResult, localBrain } from "./engine";
 import {
   initialConversationState,
   type AssistantBrain,
-  type AssistantEffect,
   type ChatMessage,
   type ConversationState,
   type MessageBlock,
@@ -16,9 +16,10 @@ import {
  * Estados del asistente:
  * - "idle": esperando al visitante.
  * - "thinking": analizando el mensaje (el orbe se acelera).
+ * - "sending": enviando la solicitud del visitante al equipo.
  * - "error": la respuesta falló; se ofrece reintentar.
  */
-export type AssistantStatus = "idle" | "thinking" | "error";
+export type AssistantStatus = "idle" | "thinking" | "sending" | "error";
 
 type Snapshot = {
   messages: ChatMessage[];
@@ -26,7 +27,8 @@ type Snapshot = {
   conversation: ConversationState;
 };
 
-const STORAGE_KEY = "jeipy-ai:conversation";
+/** v2: conversaciones con captación real de leads (las anteriores se descartan). */
+const STORAGE_KEY = "jeipy-ai:conversation:v2";
 
 const createId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
@@ -36,25 +38,6 @@ const emptySnapshot = (): Snapshot => ({
   quickReplies: [...assistantConfig.suggestions],
   conversation: initialConversationState(),
 });
-
-const LEADS_KEY = "jeipy-ai:leads";
-
-/**
- * Ejecuta los efectos del motor. En modo prototipo los leads se guardan solo en este navegador;
- * al conectar el backend, aquí se enviarán al CRM, correo o base de datos.
- */
-function runEffects(effects: AssistantEffect[] = []) {
-  for (const effect of effects) {
-    if (effect.type === "lead-captured") {
-      try {
-        const stored = JSON.parse(localStorage.getItem(LEADS_KEY) ?? "[]") as unknown[];
-        localStorage.setItem(LEADS_KEY, JSON.stringify([...stored, { ...effect.lead, at: new Date().toISOString() }]));
-      } catch {
-        /* sin almacenamiento local disponible */
-      }
-    }
-  }
-}
 
 function loadSnapshot(): Snapshot {
   try {
@@ -100,11 +83,12 @@ export function useAssistant(brain: AssistantBrain = localBrain) {
   const send = useCallback(
     async (rawInput: string) => {
       const input = rawInput.trim();
-      if (!input || status === "thinking") return;
+      if (!input || status === "thinking" || status === "sending") return;
       lastInput.current = input;
 
       const current = latest.current;
-      setSnapshot((s) => ({ ...s, messages: [...s.messages, { id: createId(), role: "user", text: input }], quickReplies: [] }));
+      const userMessage: ChatMessage = { id: createId(), role: "user", text: input };
+      setSnapshot((s) => ({ ...s, messages: [...s.messages, userMessage], quickReplies: [] }));
       setStatus("thinking");
 
       try {
@@ -112,13 +96,27 @@ export function useAssistant(brain: AssistantBrain = localBrain) {
           brain.reply(input, current.conversation, current.messages),
           wait(thinkingTime(input)),
         ]);
-        runEffects(turn.effects);
+        const turnMessages: ChatMessage[] = turn.blocks.length ? [{ id: createId(), role: "assistant", blocks: turn.blocks }] : [];
         setSnapshot((s) => ({
           ...s,
           conversation: turn.state,
-          messages: [...s.messages, { id: createId(), role: "assistant", blocks: turn.blocks }],
+          messages: [...s.messages, ...turnMessages],
           quickReplies: turn.quickReplies ?? [],
         }));
+
+        // Envío real del lead: el motor solo confirma la recepción si el backend la confirmó.
+        const submission = turn.effects?.find((effect) => effect.type === "submit-lead");
+        if (submission) {
+          setStatus("sending");
+          const result = await submitLead(submission.lead, [...current.messages, userMessage, ...turnMessages]);
+          const outcome = leadSubmissionResult(turn.state, result.ok);
+          setSnapshot((s) => ({
+            ...s,
+            conversation: outcome.state,
+            messages: [...s.messages, { id: createId(), role: "assistant", blocks: outcome.blocks }],
+            quickReplies: outcome.quickReplies ?? [],
+          }));
+        }
         setStatus("idle");
       } catch {
         setStatus("error");

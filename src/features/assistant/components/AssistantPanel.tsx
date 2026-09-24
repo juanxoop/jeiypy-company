@@ -18,11 +18,11 @@ type AssistantPanelProps = {
 
 export function AssistantPanel({ onClose, request, onRequestHandled }: AssistantPanelProps) {
   const assistant = useAssistant();
-  const { messages, quickReplies, status, conversation } = assistant;
+  const { messages, quickReplies, status } = assistant;
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const thinking = status === "thinking";
+  const thinking = status === "thinking" || status === "sending";
   const empty = messages.length === 0;
 
   useEffect(() => {
@@ -64,7 +64,6 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
       onClose();
       document.querySelector(href)?.scrollIntoView({ behavior: "smooth" });
     },
-    leadCaptured: conversation.leadCaptured,
   };
 
   return (
@@ -98,7 +97,7 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
           </p>
           <p className="flex items-center gap-1.5 text-xs text-glow" aria-live="polite">
             <span aria-hidden className={cn("size-1.5 rounded-full bg-glow", thinking ? "animate-jp-pulse" : "opacity-80")} />
-            {thinking ? "Analizando…" : assistantConfig.status}
+            {status === "sending" ? "Enviando tu solicitud…" : thinking ? "Analizando…" : assistantConfig.status}
           </p>
         </div>
         {!empty && (

@@ -6,9 +6,10 @@
  * 2. Diagnostica con preguntas cortas (una por turno, nunca repetidas).
  * 3. Recomienda el plan y explica por qué frente al plan vecino.
  * 4. Resuelve dudas y objeciones sin presionar.
- * 5. Captura los datos comerciales dentro del chat y genera el resumen del lead.
- * 6. Ofrece WhatsApp o una persona solo como cierre: si se pide, si el caso lo requiere
- *    o cuando ya hay una recomendación.
+ * 5. Cierra con "¿Cómo quieres continuar?": asesor por WhatsApp o solicitud de llamada.
+ * 6. Captura los datos (nombre, teléfono, email opcional, negocio), pide autorización y
+ *    emite el efecto `submit-lead`: `useAssistant` lo envía al backend y el motor muestra
+ *    el resultado real con `leadSubmissionResult` (nunca simula que el equipo lo recibió).
  * Nunca inventa precios, funciones ni resultados: todo sale de `knowledge.ts`.
  */
 import { assistantConfig } from "@/config/assistant";
@@ -20,9 +21,11 @@ import {
   enrichProfile,
   extractBudget,
   extractBusinessType,
-  extractContact,
+  extractChannel,
+  extractEmail,
   extractGoal,
   extractName,
+  extractPhone,
   extractWebsite,
   isBookingBusiness,
   isKnownBusiness,
@@ -32,6 +35,7 @@ import {
   parseYesNo,
   type Intent,
 } from "./nlu";
+import { FEATURE_LABEL, GOAL_LABEL, WEBSITE_LABEL, needsLabels } from "@/features/leads/labels";
 import { aiCostNote, lowerPlan, needsAiLevelQuestion, recommendPlan } from "./recommend";
 import type {
   AiTierId,
@@ -40,8 +44,7 @@ import type {
   ConversationState,
   Feature,
   Goal,
-  HandoffAction,
-  Lead,
+  LeadDraft,
   MessageBlock,
   PlanId,
   Profile,
@@ -79,8 +82,32 @@ function nextSlot(state: ConversationState): Slot | null {
   const pending = (slot: Slot, known: boolean) => (!known && !skipped.includes(slotKey(slot)) ? slot : null);
   const f = profile.features;
 
-  const contactSlots = [pending({ kind: "name" }, Boolean(profile.name)), pending({ kind: "contact" }, Boolean(profile.contact))];
-  if (flow === "lead") return contactSlots.find((s): s is Slot => s !== null) ?? null;
+  const consent = pending({ kind: "consent" }, state.consentGiven);
+  if (flow === "lead") {
+    return (
+      [
+        pending({ kind: "name" }, Boolean(profile.name)),
+        pending({ kind: "phone" }, Boolean(profile.phone)),
+        pending({ kind: "email" }, Boolean(profile.email)),
+        pending({ kind: "businessName" }, Boolean(profile.businessName)),
+        pending({ kind: "channel" }, Boolean(profile.preferredChannel)),
+        consent,
+      ].find((s): s is Slot => s !== null) ?? null
+    );
+  }
+  if (flow === "callback") {
+    const known = Boolean(profile.name && profile.phone);
+    return (
+      [
+        known ? pending({ kind: "confirm-contact" }, false) : null,
+        pending({ kind: "name" }, Boolean(profile.name)),
+        pending({ kind: "phone" }, Boolean(profile.phone)),
+        pending({ kind: "businessName" }, Boolean(profile.businessName)),
+        pending({ kind: "preferredTime" }, Boolean(profile.preferredTime)),
+        consent,
+      ].find((s): s is Slot => s !== null) ?? null
+    );
+  }
 
   const diagnosis: (Slot | null)[] = [
     pending({ kind: "businessType" }, Boolean(profile.businessType)),
@@ -98,7 +125,8 @@ function nextSlot(state: ConversationState): Slot | null {
   return diagnosis.find((s): s is Slot => s !== null) ?? null;
 }
 
-function question(slot: Slot, profile: Profile): { blocks: MessageBlock[]; quickReplies?: string[] } {
+function question(slot: Slot, state: ConversationState): { blocks: MessageBlock[]; quickReplies?: string[] } {
+  const profile = state.profile;
   const yesNo = ["Sí", "No"];
   const kind = businessKind(profile);
   switch (slot.kind) {
@@ -132,11 +160,43 @@ function question(slot: Slot, profile: Profile): { blocks: MessageBlock[]; quick
         quickReplies: ["Solo responder dudas y captar datos", "También automatizar procesos"],
       };
     case "name":
-      return { blocks: [text("¿A nombre de quién preparo la propuesta?")] };
-    case "contact":
+      return { blocks: [text("¿Cuál es tu nombre?")] };
+    case "phone":
       return {
-        blocks: [text("¿Por dónde te contactamos? Déjame tu WhatsApp o tu correo.")],
+        blocks: [text(`${profile.name ? `Gracias, ${firstName(profile.name)}. ` : ""}¿A qué número de celular te podemos contactar?`)],
         quickReplies: ["Prefiero no dejarlo"],
+      };
+    case "email":
+      return { blocks: [text("¿Quieres dejar también un correo? Es opcional.")], quickReplies: ["Omitir"] };
+    case "businessName":
+      return {
+        blocks: [text(`¿Cómo se llama tu ${isKnownBusiness(profile.businessType) ? profile.businessType : "negocio"}?`)],
+        quickReplies: ["Aún no tiene nombre"],
+      };
+    case "channel":
+      return {
+        blocks: [text("¿Por dónde prefieres que te contactemos?")],
+        quickReplies: ["WhatsApp", "Llamada", ...(profile.email ? ["Correo"] : [])],
+      };
+    case "preferredTime":
+      return {
+        blocks: [text("¿Tienes un horario preferido para la llamada? Es opcional.")],
+        quickReplies: ["En la mañana", "En la tarde", "Cualquier horario"],
+      };
+    case "confirm-contact":
+      return {
+        blocks: [text(`Confirmo tus datos para la llamada: **${profile.name}** · ${profile.phone}. ¿Son correctos?`)],
+        quickReplies: ["Sí, son correctos", "Cambiar datos"],
+      };
+    case "consent":
+      return {
+        blocks: [
+          { type: "summary", title: "Resumen de tu solicitud", rows: summaryRows(state) },
+          text(
+            "Antes de enviarlo: ¿autorizas a Jeipy Company a contactarte por teléfono, WhatsApp o correo sobre esta solicitud? Usaremos tus datos solo para eso.",
+          ),
+        ],
+        quickReplies: ["Sí, autorizo", "No, gracias"],
       };
     case "confirm-plan":
       return { blocks: [text(`¿Quieres que lo ajustemos a ${getPlan(slot.planId).name}?`)], quickReplies: [`Sí, ver ${getPlan(slot.planId).name}`, "No, lo mantengo"] };
@@ -254,45 +314,71 @@ function fillSlot(slot: Slot, input: string, state: ConversationState): Filled |
       );
     }
     case "name": {
-      if (declines(input)) return { state: { ...state, skipped: [...state.skipped, "name", "contact"] } };
       const value = extractName(input);
       if (!value) return null;
       profile.name = value;
-      return next(`Gracias, ${value.split(" ")[0]}.`);
-    }
-    case "contact": {
-      if (declines(input)) return { state: { ...state, skipped: [...state.skipped, "contact"] } };
-      const value = extractContact(input);
-      if (!value) return null;
-      profile.contact = value;
       return next();
     }
+    case "phone": {
+      const value = extractPhone(input);
+      if (!value) return null;
+      profile.phone = value;
+      profile.email ??= extractEmail(input);
+      return next();
+    }
+    case "email": {
+      const skip = () => ({ state: { ...state, skipped: [...state.skipped, "email"] } });
+      if (declines(input)) return skip();
+      const value = extractEmail(input);
+      if (!value) return null;
+      profile.email = value;
+      return next();
+    }
+    case "businessName": {
+      if (declines(input) || /sin nombre|no tiene nombre/.test(normalize(input))) {
+        return { state: { ...state, skipped: [...state.skipped, "businessName"] } };
+      }
+      const value = input.trim().replace(/\s+/g, " ");
+      if (value.length < 2 || value.length > 80 || isQuestion(input)) return null;
+      profile.businessName = value;
+      return next();
+    }
+    case "channel": {
+      const value = extractChannel(input);
+      if (!value) return null;
+      profile.preferredChannel = value;
+      return next();
+    }
+    case "preferredTime": {
+      const t = normalize(input);
+      if (declines(input) || t.includes(" cualquier")) return { state: { ...state, skipped: [...state.skipped, "preferredTime"] } };
+      const value = input.trim().replace(/\s+/g, " ");
+      if (value.length < 2 || value.length > 60 || isQuestion(input)) return null;
+      profile.preferredTime = value;
+      return next();
+    }
+    case "confirm-contact": {
+      const t = normalize(input);
+      if (t.includes(" cambiar") || parseYesNo(input) === "no") {
+        profile.name = undefined;
+        profile.phone = undefined;
+        return { state: { ...state, profile, skipped: [...state.skipped, "confirm-contact"] }, ack: "Claro, actualicémoslos." };
+      }
+      if (parseYesNo(input) !== "yes" && !t.includes(" correcto")) return null;
+      return { state: { ...state, skipped: [...state.skipped, "confirm-contact"] } };
+    }
+    case "consent":
+      return null; // se resuelve en `respond`
     case "confirm-plan":
       return null; // se resuelve en `respond`
   }
 }
 
+const firstName = (name: string) => name.split(" ")[0];
+
 /* ---------------------------------------------------------------
    Resúmenes, lead y cierre
    --------------------------------------------------------------- */
-
-const WEBSITE_LABEL = { yes: "Ya tiene web", no: "Aún no tiene web", social: "Solo redes y WhatsApp" } as const;
-const GOAL_LABEL: Record<Goal, string> = {
-  clients: "Conseguir más clientes",
-  image: "Imagen más profesional",
-  showcase: "Mostrar productos o servicios",
-  sell: "Vender más",
-  automate: "Automatizar la atención",
-};
-const FEATURE_LABEL: Record<Feature, string> = {
-  catalog: "catálogo",
-  booking: "reservas",
-  forms: "formularios",
-  ai: "automatización con IA",
-  integrations: "integraciones",
-  seo: "SEO",
-  automation: "automatización de procesos",
-};
 
 const aiInterestLabel = (profile: Profile, aiTier?: AiTierId) =>
   !profile.features.ai
@@ -305,94 +391,180 @@ const aiInterestLabel = (profile: Profile, aiTier?: AiTierId) =>
 
 const wantedFeatures = (profile: Profile) => (Object.keys(profile.features) as Feature[]).filter((f) => profile.features[f]);
 
-function summaryRows(profile: Profile, planId?: PlanId, aiTier?: AiTierId) {
+const joinNatural = (items: string[]) =>
+  items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
+
+/** Lo que el visitante ve antes de autorizar el envío: exactamente lo que recibirá el equipo. */
+function summaryRows(state: ConversationState) {
+  const { profile, recommended: planId, recommendedAi: aiTier } = state;
   const rows: { label: string; value: string }[] = [];
   if (profile.name) rows.push({ label: "Nombre", value: profile.name });
-  if (profile.businessType) rows.push({ label: "Negocio", value: capitalize(profile.businessType) });
+  const business = [profile.businessName, profile.businessType && (profile.businessName ? `(${profile.businessType})` : capitalize(profile.businessType))]
+    .filter(Boolean)
+    .join(" ");
+  if (business) rows.push({ label: "Negocio", value: business });
   if (profile.website) rows.push({ label: "Hoy", value: WEBSITE_LABEL[profile.website] });
   if (profile.goal) rows.push({ label: "Objetivo", value: GOAL_LABEL[profile.goal] });
   const wanted = wantedFeatures(profile).filter((f) => f !== "ai");
   if (wanted.length) rows.push({ label: "Necesita", value: capitalize(wanted.map((f) => FEATURE_LABEL[f]).join(", ")) });
   if (profile.features.ai !== undefined) rows.push({ label: "Interés en IA", value: aiInterestLabel(profile, aiTier) });
   if (profile.budget) rows.push({ label: "Presupuesto", value: profile.budget === "skipped" ? "Sin definir" : formatCop(profile.budget.amount) });
-  if (planId) rows.push({ label: "Plan orientativo", value: `${getPlan(planId).name} (desde ${getPlan(planId).price})` });
-  if (aiTier) {
-    const tier = getAiTier(aiTier);
-    rows.push({ label: "Jeipy AI", value: `${tier.name} (configuración desde ${tier.setup.price} + mensualidad según uso)` });
+  if (planId) {
+    const plan = getPlan(planId);
+    rows.push({ label: "Recomendación", value: `${plan.name}${aiTier ? ` + ${getAiTier(aiTier).name}` : ""} (web desde ${plan.price})` });
   }
-  if (profile.contact) rows.push({ label: "Contacto", value: profile.contact });
+  if (profile.phone) rows.push({ label: "Teléfono", value: profile.phone });
+  if (profile.email) rows.push({ label: "Correo", value: profile.email });
+  if (state.flow === "callback" || state.callbackRequested) {
+    rows.push({ label: "Solicita llamada", value: profile.preferredTime ? `Sí · ${profile.preferredTime}` : "Sí" });
+  }
   return rows;
 }
 
-/** "Lead: barbería / necesita reservas + catálogo / interés en IA / presupuesto aproximado $X". */
-export function leadSummary(profile: Profile, planId?: PlanId, aiTier?: AiTierId): string {
-  const parts = [`Lead: ${profile.businessType ?? "negocio sin especificar"}`];
-  const needs = wantedFeatures(profile).filter((f) => f !== "ai").map((f) => FEATURE_LABEL[f]);
-  if (profile.goal) needs.unshift(GOAL_LABEL[profile.goal].toLowerCase());
-  if (needs.length) parts.push(`necesita ${needs.join(" + ")}`);
-  parts.push(
-    !profile.features.ai
-      ? "sin interés en IA por ahora"
-      : aiTier
-        ? `interés en ${getAiTier(aiTier).name}`
-        : profile.aiLevel === "advanced"
-          ? "interés en IA avanzada"
-          : "interés en IA básica",
-  );
-  if (profile.budget && profile.budget !== "skipped") parts.push(`presupuesto aproximado ${formatCop(profile.budget.amount)}`);
-  if (planId) parts.push(`plan orientativo ${getPlan(planId).name}`);
-  return `${parts.join(" / ")}.`;
+/**
+ * Mensaje breve para WhatsApp: nombre, negocio, plan recomendado y necesidad principal.
+ * Sin teléfono, correo ni otros datos sensibles en la URL.
+ */
+export function buildWhatsAppMessage(state: ConversationState): string {
+  const { profile, recommended, recommendedAi } = state;
+  const hello = profile.name ? `Hola, soy ${firstName(profile.name)}.` : "Hola.";
+  const business = profile.businessName
+    ? profile.businessName
+    : isKnownBusiness(profile.businessType)
+      ? `mi ${profile.businessType}`
+      : "mi negocio";
+  const parts = [`${hello} Estuve hablando con Jeipy AI sobre ${business}.`];
+  if (recommended) {
+    const plan = `${getPlan(recommended).name}${recommendedAi ? ` + ${getAiTier(recommendedAi).name}` : ""}`;
+    const needs = needsLabels(profile.goal, wantedFeatures(profile)).slice(0, 3);
+    parts.push(`Me recomendó ${plan}${needs.length ? ` porque necesito ${joinNatural(needs)}` : ""}.`);
+    parts.push("Quisiera continuar con la cotización.");
+  } else {
+    parts.push("Quisiera hablar con un asesor.");
+  }
+  return parts.join(" ");
 }
 
-/** Mensaje prellenado para WhatsApp con el contexto de la conversación. */
-export function buildWhatsAppMessage(profile: Profile, planId?: PlanId, aiTier?: AiTierId): string {
-  const rows = summaryRows(profile, planId, aiTier);
-  if (!rows.length) return "Hola Jeipy, vengo del asistente de la web y quiero hablar con una persona.";
-  return ["Hola Jeipy, vengo del asistente de la web.", ...rows.map((r) => `${r.label}: ${r.value}`)].join("\n");
+/** "¿Cómo quieres continuar?": asesor ahora (WhatsApp) o solicitud de llamada, con igual peso. */
+function closingBlock(state: ConversationState, title = "¿Cómo quieres continuar?"): MessageBlock {
+  return { type: "closing", title, whatsappMessage: buildWhatsAppMessage(state), offerCallback: !state.callbackRequested };
 }
 
-function handoffBlock(state: ConversationState): MessageBlock {
-  const actions: HandoffAction[] = [];
-  if (!state.leadCaptured) actions.push("lead");
-  actions.push(isWhatsAppConfigured() ? "whatsapp" : "contact-section");
-  return { type: "handoff", actions, whatsappMessage: buildWhatsAppMessage(state.profile, state.recommended, state.recommendedAi) };
+/** Lead listo para el backend, construido solo con lo que el visitante contó en la conversación. */
+export function buildLeadDraft(state: ConversationState): LeadDraft {
+  const { profile } = state;
+  return {
+    conversationId: state.conversationId,
+    consent: true,
+    name: profile.name ?? "",
+    phone: profile.phone ?? "",
+    email: profile.email,
+    businessName: profile.businessName,
+    businessType: profile.businessType,
+    website: profile.website,
+    goal: profile.goal,
+    features: wantedFeatures(profile),
+    aiInterest: Boolean(profile.features.ai),
+    aiLevel: profile.features.ai ? profile.aiLevel : undefined,
+    recommendedPlan: state.recommended,
+    recommendedAi: state.recommendedAi,
+    budget: profile.budget && profile.budget !== "skipped" ? profile.budget.amount : undefined,
+    intent: state.callbackRequested ? "callback" : (state.leadIntent ?? "quote"),
+    callbackRequested: state.callbackRequested,
+    preferredTime: profile.preferredTime,
+    preferredChannel: state.callbackRequested ? (profile.preferredChannel ?? "llamada") : profile.preferredChannel,
+    isUpdate: state.leadCaptured,
+  };
 }
 
-function captureLead(state: ConversationState, lead: MessageBlock[] = []): Reply {
-  const profile = state.profile;
-  const done: ConversationState = { ...state, flow: "free", expecting: null, leadCaptured: true };
+/** Con autorización y datos completos: se pide a `useAssistant` que envíe el lead. */
+function submitLead(state: ConversationState, lead: MessageBlock[] = []): Reply {
+  const next: ConversationState = { ...state, expecting: null, consentGiven: true, pendingSubmission: true, retries: 0 };
+  return {
+    blocks: lead,
+    state: next,
+    effects: [{ type: "submit-lead", lead: buildLeadDraft(next) }],
+  };
+}
 
-  if (!profile.contact) {
+/**
+ * Respuesta al resultado real del envío. Solo confirma la recepción si el backend
+ * guardó o notificó el lead; si no, lo dice con honestidad y ofrece alternativas.
+ */
+export function leadSubmissionResult(state: ConversationState, ok: boolean): AssistantTurn {
+  if (ok) {
+    const next: ConversationState = { ...state, flow: "free", expecting: null, pendingSubmission: false, leadCaptured: true, handoffOffered: true };
+    const whatsapp = isWhatsAppConfigured();
     return {
-      blocks: [...lead, text("Sin problema. Cuando quieras retomarlo, puedes continuar con el equipo desde aquí."), handoffBlock(done)],
-      quickReplies: ["Tengo otra duda"],
-      state: { ...done, leadCaptured: false, handoffOffered: true },
+      blocks: [
+        {
+          type: "lead-status",
+          ok: true,
+          title: "Solicitud recibida",
+          text: state.callbackRequested
+            ? "Ya tenemos tus datos. Un asesor de Jeipy podrá contactarte para hablar sobre tu proyecto."
+            : "Ya tenemos tus datos. El equipo de Jeipy revisará tu solicitud y te contactará para continuar con tu proyecto.",
+        },
+        ...(whatsapp || !state.callbackRequested ? [closingBlock(next, "Si quieres adelantar la conversación:")] : []),
+      ],
+      quickReplies: whatsapp || !state.callbackRequested ? [] : ["Tengo otra duda"],
+      state: next,
     };
   }
-
-  const record: Lead = {
-    name: profile.name ?? "Sin nombre",
-    contact: profile.contact,
-    summary: leadSummary(profile, state.recommended, state.recommendedAi),
-    profile,
-    plan: state.recommended,
-    aiTier: state.recommendedAi,
-  };
+  const whatsapp = isWhatsAppConfigured();
   return {
     blocks: [
-      ...lead,
-      text(`Listo${profile.name ? `, ${profile.name.split(" ")[0]}` : ""}. Este es el resumen que recibirá el equipo para preparar tu propuesta:`),
-      { type: "summary", title: "Resumen de tu solicitud", rows: summaryRows(profile, state.recommended, state.recommendedAi) },
-      ...(assistantConfig.prototype
-        ? [text("**Modo prototipo:** por ahora estos datos se guardan solo en este navegador y no llegan al equipo.")]
-        : []),
-      text("Si prefieres adelantar la conversación, puedes continuar directamente:"),
-      handoffBlock(done),
+      {
+        type: "lead-status",
+        ok: false,
+        title: "No pudimos enviar tu solicitud",
+        text: whatsapp
+          ? "Hubo un problema al registrar tus datos y no quiero hacerte creer que llegaron. Puedes intentarlo de nuevo o escribirnos directamente por WhatsApp."
+          : "Hubo un problema al registrar tus datos y no quiero hacerte creer que llegaron. Inténtalo de nuevo en unos minutos.",
+      },
+    ],
+    quickReplies: ["Reintentar envío", "Tengo otra duda"],
+    state: { ...state, flow: "free", expecting: null, pendingSubmission: true },
+  };
+}
+
+/** Datos de contacto: no alimentan el diagnóstico (un teléfono no es un presupuesto). */
+const CONTACT_SLOTS = new Set<Slot["kind"]>(["name", "phone", "email", "businessName", "channel", "preferredTime", "confirm-contact", "consent"]);
+/** Sin estos no se envía nada. */
+const REQUIRED_SLOTS = new Set<Slot["kind"]>(["name", "phone", "consent"]);
+
+/** Sin nombre, teléfono o autorización no se puede contactar: se cancela sin enviar nada. */
+function abortLead(state: ConversationState, intro?: string): Reply {
+  const next: ConversationState = { ...state, flow: "free", expecting: null, callbackRequested: state.leadCaptured && state.callbackRequested };
+  return {
+    blocks: [
+      text(
+        `${intro ?? "Sin problema, no envío nada. Para que el equipo te contacte necesito al menos tu nombre y un teléfono."}${
+          isWhatsAppConfigured() ? " Si lo prefieres, puedes escribirnos directamente:" : ""
+        }`,
+      ),
+      ...(isWhatsAppConfigured() ? [{ ...closingBlock(next, "Otras formas de continuar"), offerCallback: false } as MessageBlock] : []),
     ],
     quickReplies: ["Tengo otra duda"],
-    state: { ...done, handoffOffered: true },
-    effects: [{ type: "lead-captured", lead: record }],
+    state: next,
   };
+}
+
+/** Inicia la captura de datos: para cotizar (`lead`) o para que un asesor llame (`callback`). */
+function startContact(flow: "lead" | "callback", state: ConversationState, intro: string, lead: MessageBlock[] = []): Reply {
+  const next: ConversationState = {
+    ...state,
+    flow,
+    leadIntent: flow === "callback" ? "callback" : "quote",
+    callbackRequested: flow === "callback" || state.callbackRequested,
+    // Solo se confirman el nombre y el teléfono que ya se conocían antes de pedir la llamada.
+    skipped:
+      state.profile.name && state.profile.phone
+        ? state.skipped.filter((k) => k !== "confirm-contact")
+        : [...state.skipped.filter((k) => k !== "confirm-contact"), "confirm-contact"],
+  };
+  if (!nextSlot(next)) return submitLead(next, [...lead, text(intro)]);
+  return advance(next, [...lead, text(intro)]);
 }
 
 /* ---------------------------------------------------------------
@@ -412,33 +584,30 @@ function recommend(state: ConversationState, lead: MessageBlock[] = [], cap?: Pl
 
   if (needsHuman) {
     return {
-      blocks: [...blocks, text("Tu caso vale la pena revisarlo con una persona del equipo para ajustar el alcance a tu presupuesto."), handoffBlock(next)],
-      quickReplies: ["Tengo otra duda"],
+      blocks: [
+        ...blocks,
+        text("Tu caso vale la pena revisarlo con una persona del equipo para ajustar el alcance a tu presupuesto."),
+        closingBlock(next),
+      ],
+      quickReplies: [],
       state: { ...next, flow: "free", handoffOffered: true },
     };
   }
 
   // En cotización, tras recomendar se piden los datos para preparar la propuesta.
   if (state.flow === "quote") {
-    const contactState: ConversationState = { ...next, flow: "lead" };
-    const slot = nextSlot(contactState);
-    if (!slot) return captureLead(contactState, blocks);
-    const q = question(slot, contactState.profile);
-    return {
-      blocks: [...blocks, text("Para dejar tu propuesta lista:"), ...q.blocks],
-      quickReplies: q.quickReplies,
-      state: { ...contactState, expecting: slot },
-    };
+    return startContact("lead", next, "Para preparar tu cotización necesito unos pocos datos.", blocks);
   }
 
-  return { blocks, quickReplies: CHIPS.afterRecommendation, state: { ...next, flow: "free" } };
+  // Cierre comercial: asesor ahora o solicitud de llamada, con el mismo protagonismo.
+  return { blocks: [...blocks, closingBlock(next)], quickReplies: [], state: { ...next, flow: "free", handoffOffered: true } };
 }
 
 /** Continúa el flujo: siguiente pregunta o, si ya hay suficiente, el siguiente paso. */
 function advance(state: ConversationState, lead: MessageBlock[] = []): Reply {
   const slot = nextSlot(state);
-  if (!slot) return state.flow === "lead" ? captureLead(state, lead) : recommend(state, lead);
-  const q = question(slot, state.profile);
+  if (!slot) return state.flow === "lead" || state.flow === "callback" ? submitLead(state, lead) : recommend(state, lead);
+  const q = question(slot, state);
   return { blocks: [...lead, ...q.blocks], quickReplies: q.quickReplies, state: { ...state, expecting: slot, retries: 0 } };
 }
 
@@ -508,9 +677,9 @@ function priceObjection(state: ConversationState): Reply {
         text(
           `Entiendo. ${getPlan(current).name} es el punto de entrada, y el valor final depende del alcance. Lo mejor es revisar con el equipo qué se puede ajustar a tu presupuesto, sin compromiso.`,
         ),
-        handoffBlock(state),
+        closingBlock(state),
       ],
-      quickReplies: ["Tengo otra duda"],
+      quickReplies: [],
       state: { ...state, handoffOffered: true },
     };
   }
@@ -519,7 +688,7 @@ function priceObjection(state: ConversationState): Reply {
       ? "Si no necesitas automatización avanzada, reservas ni integraciones por ahora, probablemente Esencial cubra lo importante (web completa, catálogo y captación) con una inversión menor."
       : "Si por ahora lo prioritario es tener presencia profesional, Básico cubre página informativa, WhatsApp, ubicación y contacto con una inversión menor. Lo que dejarías para después es el catálogo y los formularios.";
   const slot: Slot = { kind: "confirm-plan", planId: lower };
-  const q = question(slot, state.profile);
+  const q = question(slot, state);
   return {
     blocks: [text(`Entiendo. Revisemos qué funciones son realmente necesarias para tu negocio. ${lost}`), ...q.blocks],
     quickReplies: q.quickReplies,
@@ -726,12 +895,18 @@ export function respond(input: string, current: ConversationState): Reply {
           state: { ...current, expecting: null },
         };
       }
+    } else if (slot.kind === "consent") {
+      const t2 = normalize(input);
+      if (t2.includes(" autorizo") || t2.includes(" acepto") || parseYesNo(input) === "yes") return submitLead(current);
+      if (parseYesNo(input) === "no" || declines(input)) return abortLead(current, "Entendido, no envío tus datos.");
+    } else if (CONTACT_SLOTS.has(slot.kind) && REQUIRED_SLOTS.has(slot.kind) && declines(input)) {
+      return abortLead(current);
     } else {
       const filled = fillSlot(slot, input, current);
       if (filled) {
         const state: ConversationState = {
           ...filled.state,
-          profile: slot.kind === "name" || slot.kind === "contact" ? filled.state.profile : enrichProfile(filled.state.profile, input),
+          profile: CONTACT_SLOTS.has(slot.kind) ? filled.state.profile : enrichProfile(filled.state.profile, input),
           expecting: null,
           retries: 0,
         };
@@ -741,7 +916,7 @@ export function respond(input: string, current: ConversationState): Reply {
 
     // "¿Cuál es mejor?" o "no sé" a mitad del diagnóstico: se explica para qué son las preguntas.
     if (intent && ["which-best", "unsure", "recommend"].includes(intent.type)) {
-      const q = question(slot, current.profile);
+      const q = question(slot, current);
       return {
         blocks: [text("Depende de lo que quieras lograr, y justo para eso te pregunto: con un par de respuestas más te digo cuál tiene más sentido."), ...q.blocks],
         quickReplies: q.quickReplies,
@@ -752,47 +927,82 @@ export function respond(input: string, current: ConversationState): Reply {
     // Una duda, objeción o petición en medio del diagnóstico: se atiende y se retoma.
     if (intent && !["quote", "recommend", "digitalize", "which-best", "unsure"].includes(intent.type)) {
       if (intent.type === "ai-tier" && intent.wants) return startAiTierFlow(intent.tier, { ...current, expecting: null });
-      if (intent.type === "human" || intent.type === "lead" || intent.type === "objection-price" || intent.type === "advance") {
+      if (["human", "lead", "objection-price", "advance", "callback", "restart"].includes(intent.type)) {
         return respond(input, { ...current, expecting: null });
       }
       const answer = answerIntent(intent, current);
       if (answer) {
-        const q = question(slot, current.profile);
+        const q = question(slot, current);
         return { blocks: [...answer.blocks, text("Retomando:"), ...q.blocks], quickReplies: q.quickReplies, state: current };
       }
     }
 
     if (current.retries < 1) {
-      const q = question(slot, current.profile);
-      return { blocks: [text("Perdona, no te entendí bien."), ...q.blocks], quickReplies: q.quickReplies, state: { ...current, retries: current.retries + 1 } };
+      const q = question(slot, current);
+      const hint =
+        slot.kind === "phone"
+          ? "Necesito un número de teléfono válido, por ejemplo 300 123 4567."
+          : slot.kind === "email"
+            ? "No reconocí el correo. Puedes escribirlo de nuevo u omitirlo."
+            : "Perdona, no te entendí bien.";
+      return { blocks: [text(hint), ...q.blocks], quickReplies: q.quickReplies, state: { ...current, retries: current.retries + 1 } };
     }
+    // Sin nombre, teléfono ni autorización no se envía nada.
+    if (REQUIRED_SLOTS.has(slot.kind)) return abortLead(current);
     return advance({ ...current, expecting: null, skipped: [...current.skipped, slotKey(slot)], retries: 0 }, [text("No te preocupes, sigamos.")]);
   }
 
   // 2. Cierre y atención humana: siempre se respetan.
+  if (intent?.type === "retry-submit" && current.pendingSubmission && current.consentGiven) {
+    return submitLead(current);
+  }
+  if (intent?.type === "callback") {
+    if (current.leadCaptured && current.callbackRequested) {
+      return {
+        blocks: [text("Tu solicitud de llamada ya está registrada: un asesor de Jeipy podrá contactarte. ¿Te ayudo con algo más mientras tanto?")],
+        quickReplies: ["Tengo otra duda"],
+        state: current,
+      };
+    }
+    return startContact(
+      "callback",
+      current,
+      current.profile.name && current.profile.phone ? "Perfecto, te llamamos." : "Perfecto, te llamamos. Solo necesito un par de datos.",
+    );
+  }
   if (intent?.type === "human") {
+    if (!isWhatsAppConfigured()) {
+      if (current.leadCaptured && current.callbackRequested) return respond("Quiero que me llamen", current);
+      return startContact("callback", current, "Con gusto. La forma más directa es que un asesor de Jeipy te llame. Solo necesito un par de datos.");
+    }
     const state = { ...current, handoffOffered: true };
     return {
       blocks: [
         text(
           current.recommended || current.profile.businessType
-            ? "Claro. Le paso al equipo el contexto de lo que hablamos para que no tengas que repetirlo."
+            ? "Claro. Al escribirnos, el asesor verá un resumen breve de lo que hablamos para que no tengas que repetirlo."
             : "Claro, una persona del equipo puede ayudarte.",
         ),
-        handoffBlock(state),
+        closingBlock(state),
       ],
-      quickReplies: ["Seguir con el asistente"],
+      quickReplies: [],
       state,
     };
   }
   if (intent?.type === "lead" || (intent?.type === "advance" && current.recommended)) {
     if (current.leadCaptured) {
-      return { blocks: [text("Ya tengo tus datos: el equipo te contactará con el resumen. ¿Te ayudo con algo más?")], quickReplies: ["Tengo otra duda"], state: current };
+      return {
+        blocks: [text("Ya tenemos tus datos: el equipo de Jeipy te contactará para continuar con tu proyecto. ¿Te ayudo con algo más?")],
+        quickReplies: ["Tengo otra duda"],
+        state: current,
+      };
     }
-    return startFlow(
+    return startContact(
       "lead",
       current,
-      intent.type === "advance" ? `Excelente decisión. Para que el equipo prepare tu propuesta de ${getPlan(current.recommended!).name}:` : "Perfecto.",
+      intent.type === "advance" && current.recommended
+        ? `Excelente decisión. Para que el equipo prepare tu propuesta de ${getPlan(current.recommended).name}, necesito unos pocos datos.`
+        : "Perfecto. Para que el equipo te contacte, necesito unos pocos datos.",
     );
   }
   if (intent?.type === "advance") {

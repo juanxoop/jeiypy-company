@@ -1,6 +1,6 @@
 # Jeipy AI: especificación del asistente
 
-Versión: **Sales V1**, vendedor consultivo. Estado: **prototipo funcional** con un motor local de reglas, sin API de IA ni WhatsApp real. Este documento es el contrato de comportamiento que debe respetar también la futura versión con modelo de IA.
+Versión: **Sales V1**, vendedor consultivo. Estado: motor local de reglas (sin API de IA) con **captación real de leads** (`/api/leads`: Supabase + Resend). Este documento es el contrato de comportamiento que debe respetar también la futura versión con modelo de IA.
 
 ## 1. Rol
 
@@ -125,7 +125,7 @@ src/features/assistant/
   nlu.ts                         normalización, intenciones y extracción de datos
   recommend.ts                   recomendación con razones, alternativa y notas
   engine.ts                      lógica de conversación (motor local = AssistantBrain)
-  useAssistant.ts                estado de la conversación, persistencia y efectos (guardar leads)
+  useAssistant.ts                estado de la conversación, persistencia y envío del lead a /api/leads
   components/
     AssistantOrb.tsx             identidad visual (reposo / analizando)
     AssistantLauncher.tsx        widget flotante + carga diferida del panel
@@ -168,16 +168,21 @@ src/features/assistant/
 | "¿Garantizan resultados?" | No promete resultados. Explica cómo está pensada la web para convertir. |
 | "¿Cuánto es la mensualidad?" | No da cifras: explica qué cubre, que depende del uso y del alcance, los ajustes incluidos por nivel, y ofrece continuar el diagnóstico. |
 
-**Cotización:** diagnóstico → presupuesto (opcional) → recomendación → nombre → medio de contacto (WhatsApp o correo, se puede omitir) → resumen de la solicitud y resumen interno del lead, por ejemplo: `Lead: barbería / necesita conseguir más clientes + catálogo + reservas / interés en IA / plan orientativo Esencial.` "Quiero avanzar" después de una recomendación va directo a pedir los datos.
+**Cierre comercial:** tras la recomendación aparece "Tu recomendación está lista" y "¿Cómo quieres continuar?", con dos opciones del mismo peso:
+- **Hablar ahora con un asesor:** abre WhatsApp con un mensaje breve (nombre, negocio, plan recomendado y necesidad principal), sin teléfono ni correo en la URL. Si no hay número configurado, inicia la solicitud de llamada.
+- **Quiero que me llamen:** confirma el nombre y el teléfono (o los pide), pide el nombre del negocio si falta y un horario opcional, y envía con `callbackRequested = true`.
+- **Tengo otra duda** (secundaria): vuelve a la conversación.
 
-**Cierre:** WhatsApp o "Hablar con una persona" aparecen cuando el visitante lo pide, al cerrar una cotización, después de una recomendación (enlace secundario en la tarjeta) o cuando el asistente no puede resolver algo.
+**Captación del lead:** "Quiero avanzar", "Dejar mis datos" o el final de una cotización piden nombre, teléfono, correo (opcional), nombre del negocio (si falta) y canal preferido. Antes de enviar muestra el resumen y pide autorización ("¿autorizas a Jeipy Company a contactarte…?"). Sin nombre, teléfono o autorización no se envía nada. Una segunda solicitud en la misma conversación (p. ej. llamada después de cotizar) actualiza el mismo lead.
 
-**Lead en el prototipo:** el motor emite el efecto `lead-captured` y `useAssistant` lo guarda en el navegador (`localStorage`, clave `jeipy-ai:leads`). Al conectar el backend, ese mismo efecto se enviará al CRM o al correo.
+**Envío real:** el motor emite el efecto `submit-lead` y `useAssistant` lo envía a `POST /api/leads` junto con el historial. El servidor lo guarda (Supabase) y avisa al equipo (Resend). El motor muestra "Solicitud recibida" solo si el backend lo confirmó; si falla, lo dice y ofrece "Reintentar envío". No promete tiempos de respuesta.
+
+**Prioridad interna** (no se muestra al cliente): Nuevo, Interesado (tiene recomendación), Cotización o Solicita llamada.
 
 ## 8. Próxima fase: integración real
 
 1. **Modelo de IA:** crear una ruta de servidor y una implementación de `AssistantBrain` que la llame, sin exponer claves en el cliente. Las instrucciones del modelo salen de las secciones 1 a 3 de este documento, y la información sobre Jeipy, de `knowledge.ts`. El motor local queda como respaldo si el modelo falla.
 2. **Herramientas del modelo:** `recomendar_plan` (reutiliza `recommend.ts` para que las cifras sigan siendo exactas), `guardar_contacto` y `abrir_whatsapp`.
-3. **Contactos:** hoy el efecto `lead-captured` los guarda solo en el navegador (modo prototipo). Hay que conectarlos a un correo, un CRM o una base de datos y cambiar `prototype` a `false`.
-4. **WhatsApp:** basta con configurar el número en `src/config/site.ts`. El asistente ya prepara el mensaje con el resumen.
+3. **Contactos:** ya se envían a `/api/leads` (Supabase + Resend). Siguiente paso posible: conectar un CRM implementando `LeadStore`.
+4. **WhatsApp:** basta con definir `NEXT_PUBLIC_WHATSAPP_NUMBER`. El asistente ya prepara el mensaje breve.
 5. **Memoria y base de conocimiento ampliada:** preguntas frecuentes reales, tiempos, formas de pago y las políticas que el equipo confirme.

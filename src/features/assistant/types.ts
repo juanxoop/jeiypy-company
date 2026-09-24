@@ -1,5 +1,6 @@
 import type { JeipyAiTierId } from "@/data/jeipyAi";
 import type { Plan } from "@/data/plans";
+import type { ContactChannel, LeadIntent, LeadSubmission } from "@/features/leads/types";
 
 export type PlanId = Plan["id"];
 export type AiTierId = JeipyAiTierId;
@@ -39,7 +40,13 @@ export type Profile = {
   aiTier?: AiTierId;
   /** Datos de contacto, solo si el visitante decide dejarlos. */
   name?: string;
-  contact?: string;
+  phone?: string;
+  email?: string;
+  /** Nombre comercial del negocio (el tipo va en `businessType`). */
+  businessName?: string;
+  preferredChannel?: ContactChannel;
+  /** Horario preferido para la llamada, en palabras del visitante. */
+  preferredTime?: string;
 };
 
 /* ---------------------------------------------------------------
@@ -56,17 +63,28 @@ export type Slot =
   /** Pregunta de desempate entre Esencial + Jeipy AI y Premium. */
   | { kind: "aiLevel" }
   | { kind: "name" }
-  | { kind: "contact" }
+  | { kind: "phone" }
+  | { kind: "email" }
+  | { kind: "businessName" }
+  | { kind: "channel" }
+  | { kind: "preferredTime" }
+  /** Confirmar nombre y teléfono ya conocidos antes de pedir la llamada. */
+  | { kind: "confirm-contact" }
+  /** Autorización para que Jeipy contacte al visitante. */
+  | { kind: "consent" }
   /** Confirmación de un plan alternativo propuesto ante una objeción. */
   | { kind: "confirm-plan"; planId: PlanId };
 
 /**
  * free: conversación abierta · advisor: diagnóstico para recomendar ·
- * quote: diagnóstico + presupuesto + datos de contacto · lead: solo datos de contacto.
+ * quote: diagnóstico + presupuesto + datos de contacto · lead: datos para la cotización ·
+ * callback: datos para que un asesor llame.
  */
-export type Flow = "free" | "advisor" | "quote" | "lead";
+export type Flow = "free" | "advisor" | "quote" | "lead" | "callback";
 
 export type ConversationState = {
+  /** Identifica la conversación: las solicitudes sucesivas actualizan el mismo lead. */
+  conversationId: string;
   flow: Flow;
   expecting: Slot | null;
   profile: Profile;
@@ -79,11 +97,16 @@ export type ConversationState = {
   skipped: string[];
   /** Intentos fallidos de entender la respuesta a la pregunta actual. */
   retries: number;
-  /** Ya se registró un lead en esta conversación. */
+  /** El backend confirmó que el lead quedó registrado (guardado o notificado). */
   leadCaptured: boolean;
+  /** Qué pidió el visitante al dejar sus datos. */
+  leadIntent?: LeadIntent;
+  callbackRequested: boolean;
+  /** Ya autorizó ser contactado en esta conversación. */
+  consentGiven: boolean;
+  /** Hay un envío autorizado pendiente o fallido (permite reintentar). */
+  pendingSubmission: boolean;
 };
-
-export type HandoffAction = "whatsapp" | "lead" | "contact-section";
 
 export type MessageBlock =
   | { type: "text"; text: string }
@@ -102,25 +125,20 @@ export type MessageBlock =
       notes?: string[];
     }
   | { type: "summary"; title: string; rows: { label: string; value: string }[] }
-  | { type: "handoff"; actions: HandoffAction[]; whatsappMessage: string };
+  /** "¿Cómo quieres continuar?": asesor por WhatsApp, solicitud de llamada y otra duda. */
+  | { type: "closing"; title: string; whatsappMessage: string; offerCallback: boolean }
+  /** Resultado real del envío del lead al backend. */
+  | { type: "lead-status"; ok: boolean; title: string; text: string };
 
 export type ChatMessage =
   | { id: string; role: "user"; text: string }
   | { id: string; role: "assistant"; blocks: MessageBlock[] };
 
-/** Registro comercial generado al cerrar una cotización o captura de datos. */
-export type Lead = {
-  name: string;
-  contact: string;
-  /** Resumen interno de una línea para el equipo comercial. */
-  summary: string;
-  profile: Profile;
-  plan?: PlanId;
-  aiTier?: AiTierId;
-};
+/** Lead listo para enviar; el historial lo añade `useAssistant`. */
+export type LeadDraft = Omit<LeadSubmission, "transcript">;
 
-/** Efectos que el motor pide ejecutar fuera de la conversación (guardar, notificar…). */
-export type AssistantEffect = { type: "lead-captured"; lead: Lead };
+/** Efectos que el motor pide ejecutar fuera de la conversación (enviar al backend…). */
+export type AssistantEffect = { type: "submit-lead"; lead: LeadDraft };
 
 export type AssistantTurn = {
   blocks: MessageBlock[];
@@ -137,7 +155,13 @@ export interface AssistantBrain {
   reply(input: string, state: ConversationState, history: ChatMessage[]): Promise<AssistantTurn>;
 }
 
+const createConversationId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+
 export const initialConversationState = (): ConversationState => ({
+  conversationId: createConversationId(),
   flow: "free",
   expecting: null,
   profile: { features: {} },
@@ -145,4 +169,7 @@ export const initialConversationState = (): ConversationState => ({
   skipped: [],
   retries: 0,
   leadCaptured: false,
+  callbackRequested: false,
+  consentGiven: false,
+  pendingSubmission: false,
 });

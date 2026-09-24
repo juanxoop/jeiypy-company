@@ -28,6 +28,8 @@ export function isQuestion(raw: string): boolean {
    --------------------------------------------------------------- */
 
 export type Intent =
+  | { type: "callback" }
+  | { type: "retry-submit" }
   | { type: "human" }
   | { type: "lead" }
   | { type: "advance" }
@@ -62,7 +64,7 @@ const PLAN_WORDS: Record<PlanId, string> = { basico: " basico", esencial: " esen
 /** Intenciones que nunca son el nombre de un negocio ("me parece caro", "¿y la mensualidad?"). */
 const CONVERSATIONAL_INTENTS = new Set<string>([
   "human", "lead", "objection-price", "think-later", "guarantee", "unsure", "which-best",
-  "ai-monthly", "ai-pricing", "ai-tier", "prices", "compare", "thanks", "restart",
+  "ai-monthly", "ai-pricing", "ai-tier", "prices", "compare", "thanks", "restart", "callback",
 ]);
 
 /** "Jeipy AI Lite" → "lite". Pro solo cuenta junto a "ai"/"ia"/"jeipy" para no confundirlo con otras palabras. */
@@ -79,6 +81,11 @@ export function detectIntent(raw: string): Intent | null {
 
   if (has(t, " empezar de nuevo", " reiniciar", " nueva conversacion")) return { type: "restart" };
 
+  if (has(t, " reintentar envio", " reintentar el envio", " enviar de nuevo")) return { type: "retry-submit" };
+  // Solicitud de llamada: va antes que "asesor" porque es más concreta.
+  if (has(t, " que me llamen", " llamenme", " me llamen", " me pueden llamar", " me puedes llamar", " solicitar una llamada", " pedir una llamada", " quiero una llamada"))
+    return { type: "callback" };
+
   // Atención humana: pedirla de forma explícita. Mencionar WhatsApp como canal del negocio no cuenta.
   if (
     has(t, " asesor", " humano", " una persona", " alguien del equipo", " hablar con alguien", " agente", " llamar", " llamada") ||
@@ -86,7 +93,7 @@ export function detectIntent(raw: string): Intent | null {
   ) {
     return { type: "human" };
   }
-  if (has(t, " dejar mis datos", " dejo mis datos", " que me contacten", " contactenme", " me pueden contactar", " llamenme", " escribanme"))
+  if (has(t, " dejar mis datos", " dejo mis datos", " que me contacten", " contactenme", " me pueden contactar", " escribanme"))
     return { type: "lead" };
   // Mensualidad de Jeipy AI: nunca se inventa un valor.
   if (has(t, " mensualidad", " mensual", " al mes", " cada mes", " por mes", " mantenimiento")) return { type: "ai-monthly" };
@@ -356,14 +363,28 @@ export function extractName(raw: string): string | undefined {
   return undefined;
 }
 
-export function extractContact(raw: string): string | undefined {
-  const email = raw.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
-  if (email) return email[0].toLowerCase();
-  const phone = raw.match(/\+?\d[\d\s-]{6,}\d/);
-  if (phone) return phone[0].replace(/\s+/g, " ").trim();
+export function extractEmail(raw: string): string | undefined {
+  const email = raw.match(/[^\s@<>]+@[^\s@<>]+\.[a-z]{2,}/i);
+  return email ? email[0].toLowerCase() : undefined;
+}
+
+/** Teléfono de 7 a 15 dígitos, conservando el formato que escribió el visitante. */
+export function extractPhone(raw: string): string | undefined {
+  const match = raw.match(/\+?\d[\d\s().-]{5,}\d/);
+  if (!match) return undefined;
+  const digits = match[0].replace(/\D/g, "");
+  if (digits.length < 7 || digits.length > 15) return undefined;
+  return match[0].replace(/\s+/g, " ").trim();
+}
+
+export function extractChannel(raw: string): "whatsapp" | "llamada" | "correo" | undefined {
+  const t = normalize(raw);
+  if (has(t, " whatsapp", " wasap", " whats")) return "whatsapp";
+  if (has(t, " llamada", " llamar", " telefono", " celular")) return "llamada";
+  if (has(t, " correo", " email", " mail")) return "correo";
   return undefined;
 }
 
 export function declines(raw: string): boolean {
-  return /^ (no|prefiero no|mejor no|no gracias|ahora no|despues|luego)\b/.test(normalize(raw));
+  return /^ (no|prefiero no|mejor no|no gracias|ahora no|despues|luego|omitir|saltar|no tengo|aun no)\b/.test(normalize(raw));
 }
