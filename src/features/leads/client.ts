@@ -12,8 +12,12 @@ function blockText(block: MessageBlock): string | null {
       return block.text.replace(/\*\*/g, "");
     case "list":
       return block.items.map((item) => `• ${item.replace(/\*\*/g, "")}`).join("\n");
-    case "recommendation":
-      return `[Recomendación: ${block.planId}${block.aiTier ? ` + Jeipy AI ${block.aiTier}` : ""}]`;
+    case "recommendation": {
+      // La tarjeta sustituye la explicación en texto: el historial conserva el plan y sus razones.
+      const plan = `${block.planId}${block.aiTier ? ` + Jeipy AI ${block.aiTier}` : ""}`;
+      const reasons = [...(block.because ?? []), ...(block.later?.length ? [`Para una segunda etapa: ${block.later.join(", ")}`] : [])];
+      return `[${block.title}: ${plan}]${reasons.length ? ` ${reasons.join(" · ")}` : ""}`;
+    }
     case "summary":
       return block.rows.map((row) => `${row.label}: ${row.value}`).join("\n");
     case "lead-status":

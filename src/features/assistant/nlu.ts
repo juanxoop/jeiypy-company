@@ -137,7 +137,7 @@ export function detectIntent(raw: string): Intent | null {
     return { type: "ai-tier", tier, wants };
   }
 
-  if (has(t, " quiero avanzar", " quiero contratar", " quiero empezar", " quiero arrancar", " empecemos", " vamos con", " lo quiero", " me lo llevo", " quiero ese plan"))
+  if (has(t, " quiero avanzar", " quiero contratar", " quiero empezar", " quiero arrancar", " empecemos", " vamos con", " lo quiero", " me lo llevo", " quiero ese plan", " quiero este plan"))
     return { type: "advance" };
 
   if (
@@ -342,6 +342,19 @@ export function businessRef(businessType?: string, possessive = "tu"): string {
   return businessType && isKnownBusiness(businessType) && !GENERIC_BUSINESS.test(normalize(businessType).trim())
     ? `${possessive} ${businessType}`
     : `${possessive} negocio`;
+}
+
+/** Rubro a grandes rasgos: cambia cómo se nombra el catálogo (menú, productos o servicios). */
+export function businessKind(profile: Profile): "food" | "retail" | "service" {
+  const t = normalize(profile.businessType ?? "");
+  if (/restaurante|cafe|panaderia|pasteleria|comidas|cafeteria/.test(t)) return "food";
+  if (
+    /tienda|boutique|venta|ferreteria|joyeria|optica|drogueria|papeleria|floristeria|miscelanea|minimercado|supermercado|repuesto|calzado|ropa|accesorio|bisuteria|cosmetic|perfum|mueble|mascota|celular|tecnologia|licorera|carniceria|fruver/.test(t) ||
+    profile.goal === "sell" ||
+    profile.channels?.includes("ecommerce")
+  )
+    return "retail";
+  return "service";
 }
 
 export function isBookingBusiness(businessType?: string): boolean {

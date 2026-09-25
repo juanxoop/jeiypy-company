@@ -13,7 +13,8 @@
  * y una operación mensual según uso, que el asistente no cuantifica.
  *
  * Mencionar "IA" no lleva a Premium: decide el nivel de automatización. Busca la solución
- * adecuada, no la más cara, y explica: plan · por qué · qué cubre · qué cambiaría la elección.
+ * adecuada, no la más cara, y la presenta como tarjeta: plan · por qué · lo más importante ·
+ * situación actual · qué cambiaría la elección. La tarjeta sustituye la explicación larga.
  *
  * Presupuesto: si el visitante dio una cifra, se recomienda el nivel más alto que entra en ella
  * (ver `ladder.ts`) y se explica con honestidad qué queda para una segunda etapa.
@@ -24,23 +25,24 @@ import {
   budgetAmount,
   coverage,
   minTier,
-  plural,
   tierCost,
   tierLabel,
   tierPlan,
   tierRank,
   type Tier,
 } from "./ladder";
-import { formatCop, getAiTier, getPlan } from "./knowledge";
-import { businessRef } from "./nlu";
-import { CHANNEL_LABEL } from "@/features/leads/labels";
-import type { AiTierId, MessageBlock, Profile } from "./types";
+import { formatCop, getAiTier } from "./knowledge";
+import { businessKind, businessRef } from "./nlu";
+import { CHANNEL_LABEL, GOAL_LABEL } from "@/features/leads/labels";
+import type { AiTierId, Profile, RecommendationBlock } from "./types";
 
 export type { Tier } from "./ladder";
 
-type Recommendation = Extract<MessageBlock, { type: "recommendation" }> & {
-  /** Frase principal que resume la recomendación. */
-  verdict: string;
+type Recommendation = RecommendationBlock & {
+  /** Frase corta que presenta la tarjeta (la explicación completa va dentro de ella). */
+  intro: string;
+  /** "Por qué": siempre presente en la recomendación. */
+  because: string[];
   /** El caso necesita revisión humana (p. ej. presupuesto por debajo del plan de entrada). */
   needsHuman: boolean;
   /** Nivel recomendado y nivel ideal sin límites de presupuesto (si difieren, hubo ajuste). */
@@ -92,36 +94,45 @@ export function pickTier(profile: Profile, cap?: Tier): Tier {
   return tier;
 }
 
+const cap = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+
+/** Cómo se nombra lo que el negocio ofrece: menú, productos o servicios. */
+function offerNoun(profile: Profile): string {
+  const kind = businessKind(profile);
+  return kind === "food" ? "tu menú" : kind === "retail" ? "tus productos" : "tus servicios";
+}
+
 /**
- * Respuestas del visitante que sostienen la recomendación, con sus palabras.
+ * "Por qué te lo recomiendo": respuestas del visitante, en frases cortas y con sus palabras.
  * Primero van las que justifican el plan elegido (en Premium, las de automatización).
+ * Solo se usa lo que contó y que el nivel cubre de verdad: lo que queda para después va en "segunda etapa".
  */
-function becauseList(profile: Profile, tier: Tier): string[] {
+export function becauseList(profile: Profile, tier: Tier): string[] {
   const f = profile.features;
+  const covers = (from: Tier) => tierRank(tier) >= tierRank(from);
   const context: string[] = [];
-  const channels = (profile.channels ?? []).filter((c) => c !== "website" && c !== "none").map((c) => CHANNEL_LABEL[c]);
-  if (profile.websiteStatus === "none") {
-    context.push(channels.length ? `Hoy trabajas con ${joinNatural(channels)}, sin una web propia.` : "Aún no tienes presencia digital.");
-  }
-  if (profile.websiteStatus === "outdated") context.push("Ya tienes página, pero está desactualizada: no partimos de cero, la renovamos.");
-  if (profile.websiteStatus === "needs_improvement") context.push("Ya tienes página, pero necesita mejoras para traerte clientes.");
-  if (profile.websiteStatus === "existing") context.push("Ya tienes página: la llevamos a una base más sólida.");
-  if (profile.goal === "image") context.push("Buscas verte más profesional.");
+  if (profile.websiteStatus === "none") context.push("Aún no tienes una web propia");
+  if (profile.websiteStatus === "outdated") context.push("Tu web actual está desactualizada");
+  if (profile.websiteStatus === "needs_improvement") context.push("Tu web actual necesita mejoras");
+  if (profile.goal === "image") context.push("Buscas una imagen más profesional");
+  if (profile.goal === "showcase" && !(f.catalog && covers("esencial"))) context.push(`Quieres mostrar ${offerNoun(profile)}`);
 
   const commercial: string[] = [];
-  if (profile.goal === "clients" || profile.goal === "sell") commercial.push("Quieres conseguir más clientes desde la web.");
-  if (f.catalog) commercial.push("Quieres mostrar tus servicios o productos con precios.");
-  if (f.forms) commercial.push("Quieres recibir solicitudes por formulario.");
-  if (f.ai && profile.aiLevel !== "advanced") commercial.push("Quieres que una IA responda preguntas frecuentes y oriente a tus visitantes.");
+  if (f.catalog && covers("esencial")) commercial.push(`Quieres mostrar ${offerNoun(profile)} con precios`);
+  if (profile.goal === "clients") commercial.push("Quieres conseguir más clientes");
+  if (profile.goal === "sell") commercial.push("Quieres vender más");
+  if (f.forms && covers("esencial")) commercial.push("Quieres recibir solicitudes por formulario");
+  if (f.seo && covers("esencial")) commercial.push("Quieres aparecer en Google");
+  if (f.ai && profile.aiLevel !== "advanced" && covers("esencial-ai")) commercial.push("Quieres que una IA responda preguntas frecuentes");
 
   const automation: string[] = [];
-  if (f.booking) automation.push("Necesitas que tus clientes reserven o agenden solos.");
-  if (f.ai && profile.aiLevel === "advanced") automation.push("Quieres una IA que gestione y clasifique solicitudes, no solo que responda dudas.");
-  if (f.automation) automation.push("Quieres automatizar procesos como cotizaciones, clasificación o seguimiento de clientes.");
-  if (f.integrations) automation.push("Necesitas conectar la web con otras herramientas.");
+  if (f.booking) automation.push("Necesitas que tus clientes reserven o agenden solos");
+  if (f.ai && profile.aiLevel === "advanced") automation.push("Quieres una IA que gestione y clasifique solicitudes");
+  if (f.automation) automation.push("Quieres automatizar la atención y el seguimiento");
+  if (f.integrations) automation.push("Necesitas conectar la web con tus herramientas");
 
-  const ordered = tier === "premium" ? [...automation, ...commercial, ...context] : [...context, ...commercial];
-  if (!ordered.length) ordered.push("Lo principal para ti es tener presencia digital clara.");
+  const ordered = tier === "premium" ? [...automation, ...commercial, ...context] : [...commercial, ...context];
+  if (!ordered.length) ordered.push("Lo principal es tener una presencia digital clara");
   return ordered.slice(0, 4);
 }
 
@@ -135,22 +146,83 @@ export function pickAiTier(profile: Profile, tier: Tier): AiTierId | undefined {
   return "pro";
 }
 
-const WEB_COVERS: Record<Tier, string[]> = {
-  basico: ["Web profesional con diseño responsive", "Contacto, WhatsApp y ubicación", "Información y servicios principales del negocio"],
-  esencial: ["Web comercial orientada a captación", "Catálogo de productos o servicios", "Formularios, SEO básico y Analytics", "Estructura para captar oportunidades"],
-  "esencial-ai": ["Todo lo del Esencial: web completa, catálogo, formularios, SEO básico y Analytics"],
-  premium: [
-    "Solución digital comercial y automatizada, a la medida",
-    "Captación y seguimiento de oportunidades, flujos comerciales y reservas según el proyecto",
-    "Integraciones, funciones personalizadas y CRM/seguimiento cuando aplique",
-    "Soporte y acompañamiento",
-  ],
+type Highlight = NonNullable<RecommendationBlock["highlights"]>[number];
+
+/**
+ * "Lo más importante para tu negocio": primero lo que resuelve de lo que pidió, luego lo que el
+ * plan trae siempre. Nunca aparece una función que el plan no incluye.
+ */
+function highlights(profile: Profile, tier: Tier, aiTier?: AiTierId): Highlight[] {
+  const f = profile.features;
+  const wantsClients = profile.goal === "clients" || profile.goal === "sell";
+  const list: (Highlight | false | undefined)[] =
+    tier === "premium"
+      ? [
+          f.booking && { icon: "booking", label: "Reservas y agenda automática" },
+          f.automation && { icon: "automation", label: "Automatización de procesos" },
+          aiTier && { icon: "ai", label: `${getAiTier(aiTier).name} (aparte)` },
+          { icon: "capture", label: "Captación de oportunidades" },
+          { icon: "followup", label: "Seguimiento de clientes" },
+          { icon: "integration", label: f.integrations ? "Integraciones con tus herramientas" : "Integraciones según el proyecto" },
+          { icon: "gear", label: "Funciones a la medida" },
+        ]
+      : tier === "basico"
+        ? [
+            { icon: "presence", label: "Web profesional y responsive" },
+            { icon: "whatsapp", label: "Contacto directo por WhatsApp" },
+            { icon: "location", label: "Ubicación y datos del negocio" },
+            { icon: "catalog", label: "Tus servicios principales" },
+          ]
+        : [
+            f.catalog && { icon: "catalog", label: "Catálogo organizado" },
+            tier === "esencial-ai" && { icon: "ai", label: "Jeipy AI Lite (opcional)" },
+            (wantsClients || f.forms) && { icon: "form", label: "Formularios y captación de contactos" },
+            { icon: "whatsapp", label: "Integración con WhatsApp" },
+            { icon: "search", label: "SEO básico" },
+            { icon: "analytics", label: "Analytics" },
+            !f.catalog && { icon: "catalog", label: "Catálogo de productos o servicios" },
+            !(wantsClients || f.forms) && { icon: "form", label: "Formularios de contacto" },
+          ];
+  return list.filter((h): h is Highlight => Boolean(h)).slice(0, 5);
+}
+
+const WEBSITE_SHORT: Record<NonNullable<Profile["websiteStatus"]>, string> = {
+  none: "No",
+  existing: "Sí",
+  outdated: "Sí, desactualizada",
+  needs_improvement: "Sí, necesita mejoras",
 };
 
-const AI_COVERS: Record<AiTierId, string> = {
-  lite: "Jeipy AI Lite (complemento opcional): responde preguntas frecuentes, explica tus servicios, orienta y capta datos básicos",
-  pro: "Jeipy AI Pro (se contrata aparte): diagnostica necesidades, recomienda, clasifica clientes potenciales y agenda cuando aplique",
-  custom: "Jeipy AI Custom (se contrata aparte): integraciones, CRM y flujos diseñados para tu operación",
+/** "Tu situación actual": solo lo que el visitante contó en la conversación. */
+export function situationRows(profile: Profile): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  const business = profile.businessName
+    ? `${profile.businessName}${profile.businessType ? ` (${profile.businessType})` : ""}`
+    : profile.businessType && cap(profile.businessType);
+  if (business) rows.push({ label: "Negocio", value: business });
+  const channels = (profile.channels ?? []).filter((c) => c !== "website" && c !== "none").map((c) => CHANNEL_LABEL[c]);
+  if (channels.length) rows.push({ label: "Presencia", value: channels.join(" + ") });
+  else if (profile.channels?.includes("none")) rows.push({ label: "Presencia", value: "Sin canales digitales" });
+  if (profile.websiteStatus) rows.push({ label: "Web", value: WEBSITE_SHORT[profile.websiteStatus] });
+  if (profile.goal) rows.push({ label: "Objetivo", value: cap(GOAL_LABEL[profile.goal].toLowerCase()) });
+  // El presupuesto no se repite aquí: la tarjeta ya dice cómo encaja con él.
+  return rows;
+}
+
+/** Frase de valor de cada nivel: lo que el cliente compra, no "una página más cara". */
+const TAGLINE: Record<Tier, string> = {
+  basico: "La forma más directa de que tu negocio se vea profesional y sea fácil de contactar.",
+  esencial: "La opción que mejor equilibra captación, presencia profesional y crecimiento.",
+  "esencial-ai": "Una web que capta clientes, con una IA que responde las dudas frecuentes por ti.",
+  premium: "No es una web más grande: es una solución que capta, da seguimiento y automatiza tu operación comercial.",
+};
+
+/** Por qué un nivel más económico puede ser una buena forma de empezar (sin descuentos inventados). */
+const WHY_START: Record<Tier, string> = {
+  basico: "Tendrías presencia profesional desde ya y puedes crecer por etapas cuando el negocio lo pida.",
+  esencial: "Conservas la parte comercial que más impacto tiene y sumas lo avanzado cuando lo necesites.",
+  "esencial-ai": "Conservas la web comercial y la IA para dudas frecuentes; la automatización profunda puede venir después.",
+  premium: TAGLINE.premium,
 };
 
 /** Nota de costos de Jeipy AI: configuración inicial + operación mensual, sin inventar la mensualidad. */
@@ -162,10 +234,12 @@ export function aiCostNote(id: AiTierId): string {
   return `${tier.name} va aparte del plan web: configuración inicial desde ${tier.setup.price} ${tier.setup.currency} (pago único) + operación mensual según nivel de uso. ${tier.maintenance.value}.`;
 }
 
-export function recommendPlan(profile: Profile, cap?: Tier): Recommendation {
+const firstUpper = (items: string[]) => items.map(cap);
+
+export function recommendPlan(profile: Profile, capTier?: Tier): Recommendation {
   const ideal = pickTier(profile);
   const budget = budgetAmount(profile);
-  let tier = pickTier(profile, cap);
+  let tier = pickTier(profile, capTier);
   let budgetGap = false;
   if (budget !== undefined) {
     const fit = affordableTier(profile, budget, tier);
@@ -178,8 +252,6 @@ export function recommendPlan(profile: Profile, cap?: Tier): Recommendation {
   const planId = tierPlan(tier);
   const downgraded = tierRank(tier) < tierRank(ideal);
   const business = businessRef(profile.businessType);
-  const pNeeds = premiumNeeds(profile);
-  const eNeeds = esencialNeeds(profile);
 
   // La IA de Premium se suma aparte: si el presupuesto no la cubre, queda para una segunda etapa.
   let aiTier = pickAiTier(profile, tier);
@@ -188,76 +260,112 @@ export function recommendPlan(profile: Profile, cap?: Tier): Recommendation {
     deferredAi = aiTier;
     aiTier = undefined;
   }
-  const aiName = aiTier ? getAiTier(aiTier).name : "";
   const notes: string[] = [];
-  let verdict: string;
-  let alternative: string;
+  let intro: string;
+  let title = "Plan recomendado";
+  let alternative: string | undefined;
+  let keeps: string[] | undefined;
+  let later: string[] | undefined;
+  let meanwhile: string[] | undefined;
 
   if (budgetGap) {
-    verdict = `Te soy transparente: con ${formatCop(budget!)} todavía no alcanza ningún plan estándar. El de entrada es **Básico**, desde ${getPlan("basico").price}, y es la opción más cercana para ${business}.`;
-    alternative = "Se puede ajustar reduciendo el alcance, haciendo el proyecto por etapas o con una propuesta personalizada del equipo.";
+    intro = `Te soy transparente: con ${formatCop(budget!)} todavía no alcanza ningún plan estándar. La opción más cercana para ${business} es nuestro plan de entrada:`;
+    title = "Plan de entrada";
+    // Las formas de ajustar la inversión se listan justo después de la tarjeta: no se repiten aquí.
   } else if (downgraded) {
     const cov = coverage(profile, tier);
-    const reason = budget !== undefined ? `dentro de tu presupuesto (${formatCop(budget)})` : "con una inversión menor";
-    verdict = `Para empezar ${reason}, te recomiendo **${tierLabel(tier)}**. Mantendrías ${joinNatural(cov.kept)}${
-      cov.lost.length ? `, y ${joinNatural(cov.lost)} ${plural(cov.lost) ? "quedarían" : "quedaría"} para una segunda etapa` : ""
-    }.`;
+    intro =
+      budget !== undefined
+        ? `Para empezar dentro de tu presupuesto (${formatCop(budget)}), esta es la opción que más sentido tiene:`
+        : "Para empezar con una inversión menor, esta es la opción que más sentido tiene:";
+    title = "Recomendado para empezar";
+    keeps = firstUpper(cov.kept);
+    later = cov.lost.length ? firstUpper(cov.lost) : undefined;
+    meanwhile = cov.workarounds.length ? cov.workarounds : undefined;
     alternative = cov.lostWith.length
       ? `Cuando quieras crecer, puedes sumar ${joinNatural(cov.lostWith)}.`
       : `Cuando quieras crecer, ${tierLabel(ideal)} suma las funciones más avanzadas.`;
-    notes.push(...cov.workarounds);
   } else {
+    intro =
+      tier === "premium" && profile.features.ai && profile.aiLevel === "advanced"
+        ? "Aquí ya necesitas automatización más profunda, no solo atención básica. Esta es mi recomendación:"
+        : `Con lo que me contaste de ${business}, esta es la opción que más sentido tiene:`;
     switch (tier) {
       case "premium":
-        verdict =
-          profile.features.ai && profile.aiLevel === "advanced" && aiTier
-            ? `Aquí ya necesitas automatización más profunda, no solo atención básica. **Premium** con **${aiName}** tiene más sentido porque permite ${joinNatural(
-                [profile.features.booking && "integrar reservas", "flujos personalizados", aiTier === "custom" ? "automatización diseñada para tu operación" : "un asistente comercial más completo"].filter(Boolean) as string[],
-              )}.`
-            : `Te recomiendo **Premium** porque necesitas ${joinNatural(pNeeds)}, algo que requiere desarrollo y flujos personalizados.${
-                aiTier ? ` Para la parte de IA, **${aiName}** es el complemento indicado.` : ""
-              }`;
         alternative = profile.features.ai
           ? "Si por ahora te basta con que la IA responda dudas y capte datos, sin reservas ni procesos automatizados, Esencial + Jeipy AI Lite sería suficiente con una inversión menor."
-          : "Si más adelante quieres que un asistente atienda y clasifique a tus clientes, Premium es compatible con Jeipy AI Pro. Y si no necesitas reservas ni integraciones, Esencial sería suficiente.";
+          : "Si no necesitas reservas, automatizaciones ni integraciones, Esencial sería suficiente. Y si más adelante quieres un asistente que atienda y clasifique clientes, Premium es compatible con Jeipy AI Pro.";
         break;
       case "esencial-ai":
-        verdict = `Por lo que me cuentas, **Esencial** cubre bien la parte de ${joinNatural(
-          eNeeds.length ? eNeeds : ["presencia digital"],
-        )}. Como también quieres automatizar preguntas frecuentes, **Jeipy AI Lite** puede añadirse como complemento sin necesidad de pasar todavía a Premium.`;
         alternative = "Si más adelante quieres que la IA gestione reservas, cotizaciones o clasifique clientes, ahí sí tendría sentido Premium con Jeipy AI Pro.";
         break;
       case "esencial":
-        verdict = `Te recomiendo **Esencial** porque necesitas ${joinNatural(eNeeds.length ? eNeeds : ["una presencia más completa"])}.`;
         alternative =
           "Si además quieres automatizar reservas o procesos más complejos, Premium sería la mejor opción. Y si quieres que una IA responda preguntas frecuentes, puedes sumar Jeipy AI Lite sin cambiar de plan.";
         break;
       default:
-        verdict = `Te recomiendo **Básico**: lo que necesitas es una presencia digital clara y profesional para ${business}.`;
         alternative = "Si más adelante quieres catálogo, formularios o captar clientes de forma activa, Esencial sería el siguiente paso.";
     }
   }
 
-  if (aiTier) notes.push(aiCostNote(aiTier));
+  // El costo de la IA va en el encabezado de la tarjeta (configuración + mensualidad): no se repite en notas.
   if (deferredAi) {
     const deferred = getAiTier(deferredAi);
     notes.push(`Con tu presupuesto, ${deferred.name} (configuración desde ${deferred.setup.price}) puede sumarse en una segunda etapa.`);
   }
-  if (budget !== undefined && !budgetGap && !downgraded) {
-    notes.push(`Entra en tu presupuesto de ${formatCop(budget)}${aiTier ? "; la operación mensual de Jeipy AI va aparte" : ""}.`);
-  }
+  const budgetInfo: RecommendationBlock["budget"] =
+    budget === undefined || budgetGap
+      ? undefined
+      : downgraded
+        ? { fits: true, text: `Ajustado a tu presupuesto de ${formatCop(budget)}` }
+        : { fits: true, text: `Entra en tu presupuesto de ${formatCop(budget)}${aiTier ? " (la mensualidad de Jeipy AI va aparte)" : ""}` };
 
+  const situation = situationRows(profile);
   return {
     type: "recommendation",
+    variant: "recommended",
     planId,
     aiTier,
+    title,
+    tagline: TAGLINE[tier],
     because: becauseList(profile, tier),
-    covers: aiTier ? [...WEB_COVERS[tier], AI_COVERS[aiTier]] : WEB_COVERS[tier],
+    highlights: highlights(profile, tier, aiTier),
+    situation: situation.length ? situation : undefined,
+    keeps,
+    later,
+    meanwhile,
+    budget: budgetInfo,
+    notes: notes.length ? notes : undefined,
     alternative,
-    notes,
-    verdict,
+    intro,
     needsHuman: budgetGap,
     tier,
     ideal,
+  };
+}
+
+/**
+ * Tarjeta de la alternativa más económica tras una objeción: qué conserva, qué deja para una
+ * segunda etapa y por qué puede ser buena forma de empezar. Nunca inventa descuentos.
+ */
+export function alternativeCard(profile: Profile, lower: Tier): RecommendationBlock {
+  const cov = coverage(profile, lower);
+  const budget = budgetAmount(profile);
+  return {
+    type: "recommendation",
+    variant: "alternative",
+    planId: tierPlan(lower),
+    aiTier: lower === "esencial-ai" ? "lite" : undefined,
+    title: "Alternativa para reducir inversión",
+    tagline: WHY_START[lower],
+    keeps: firstUpper(cov.kept),
+    later: cov.lost.length ? firstUpper(cov.lost) : undefined,
+    meanwhile: cov.workarounds.length ? cov.workarounds : undefined,
+    budget:
+      budget === undefined
+        ? undefined
+        : tierCost(lower) <= budget
+          ? { fits: true, text: `Entra en tu presupuesto de ${formatCop(budget)}` }
+          : { fits: false, text: `Aun así, estaría por encima de tu presupuesto de ${formatCop(budget)}` },
   };
 }

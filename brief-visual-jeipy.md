@@ -149,25 +149,28 @@ Extras sutiles: los iconos de servicio animan una sola pieza al hover, la luz am
 ## 15. [04] Planes
 
 - **H2 centrado:** "Una inversión clara para cada etapa de tu negocio." Subtítulo: precios orientativos.
-- **Tres cards de igual altura** con los CTA alineados abajo. Premium es un poco más ancha en desktop.
+- **Bajo el encabezado:** "¿No sabes cuál elegir? Jeipy AI puede recomendarte la opción más adecuada según tu negocio." Abre el asistente con "¿Qué plan me conviene?".
+- **Tres cards del mismo ancho.** En desktop sus bloques quedan alineados fila por fila (subgrid) y los CTA abajo.
 - **Orden de cada card:**
-  1. Número y nombre en mono.
-  2. "Desde".
-  3. Precio grande con "COP" en mono.
-  4. Resumen de una línea.
-  5. Separador.
-  6. `INCLUYE` con checks.
-  7. Espacio Jeipy AI.
-  8. CTA.
+  1. Icono del enfoque + nombre + enfoque en mono (Presencia / Captación / Automatización).
+  2. "Desde" y precio grande con "COP" en mono.
+  3. Frase de valor (y en Premium, la aclaración "No es una web más grande…").
+  4. Cómo trabaja, en pasos cortos: Básico reúne (Tu web + WhatsApp + Ubicación), Esencial recorre (Visita → Catálogo → Contacto → Oportunidad) y Premium cicla (Capta → Organiza → Da seguimiento → Automatiza).
+  5. `IDEAL PARA` en chips.
+  6. `INCLUYE`: 6 puntos visibles; el resto en "Ver todo lo que incluye (+N)".
+  7. `RESULTADO ESPERADO`: 3 beneficios con icono.
+  8. Jeipy AI en versión compacta (el detalle está en la sección Jeipy AI).
+  9. CTA "Quiero este plan".
 
 | | Básico | Esencial | Premium |
 | --- | --- | --- | --- |
 | Precio | Desde $999.900 COP | Desde $2.399.000 COP | Desde $4.699.000 COP |
-| Posicionamiento | Presencia digital profesional. | Web comercial orientada a captación (Jeipy AI Lite como complemento opcional). | Solución digital comercial y automatizada (no "una página más cara"). |
+| Frase de valor | Presencia digital profesional. | Una web pensada para captar oportunidades (Jeipy AI Lite como complemento opcional). | Una solución comercial automatizada (no "una página más cara"). |
+| Resultado esperado | Más confianza · Te encuentran más fácil · Contacto directo | Más oportunidades · Clientes mejor informados · Contactos organizados | Menos procesos manuales · Seguimiento de cada oportunidad · Atención que escala |
 | Incluye | Página informativa, responsive, info del negocio, WhatsApp, ubicación y contacto, estructura visual profesional, optimización básica de rendimiento. | Sitio más completo, varias secciones, catálogo, formularios de contacto o cotización, SEO básico y Analytics, WhatsApp, velocidad y experiencia optimizadas, responsive. | Diseño avanzado, desarrollo personalizado, catálogo avanzado, formularios y flujos a medida, integraciones, SEO básico y Analytics, optimización avanzada, soporte y acompañamiento, actualizaciones, responsive. |
-| Jeipy AI | Fila discreta: "Jeipy AI · No incluido". | Bajo `OPCIONAL`: recuadro punteado secundario con "+". | Sección propia destacada (ver punto 16). |
-| Destaque | — | Borde en degradado azul, nombre en azul, badge discreto "Más popular" con punto. | La columna más ancha y el bloque de IA más tecnológico. |
-| CTA | "Empezar con Básico" (contorno) | "Elegir Esencial" (azul sólido) | "Hablar sobre Premium" (contorno con tinte azul) |
+| Jeipy AI | Fila discreta: "Sin Jeipy AI. Ideal para comenzar…". | Recuadro punteado "+ Jeipy AI Lite · Opcional" con costo y enlace. | Bloque compacto "Compatible con Jeipy AI Pro" con Atiende · Capta · Conecta (detalle en el punto 16). |
+| Destaque | Neutro. | Borde en degradado azul, nombre en azul, badge discreto "Recomendado" con punto. | Icono en degradado, trama tecnológica sutil y bloque de IA más tecnológico. |
+| CTA | "Quiero este plan" (contorno) | "Quiero este plan" (azul sólido) | "Quiero este plan" (contorno con tinte azul) |
 
 - **Notas bajo los planes:**
   - Con icono de información: "El precio final depende del alcance, funcionalidades e integraciones de cada proyecto."

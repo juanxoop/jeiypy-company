@@ -1,4 +1,5 @@
 import { AssistantOrb } from "@/features/assistant/components/AssistantOrb";
+import { PlanAdvisorHint } from "@/features/assistant/components/PlanAdvisorHint";
 import { Reveal, RevealGroup, RevealItem } from "@/components/motion/Reveal";
 import { Container } from "@/components/ui/Container";
 import { JeipyAiOffer } from "@/components/ui/JeipyAiOffer";
@@ -24,10 +25,15 @@ export function Pricing() {
           titleId="planes-title"
         />
 
-        <RevealGroup as="ul" className="mx-auto mt-14 grid max-w-xl gap-5 sm:mt-20 lg:max-w-none lg:grid-cols-[1fr_1fr_1.25fr] lg:gap-4 xl:gap-5">
-          {plans.map((plan, index) => (
-            <RevealItem as="li" key={plan.id} className="h-full">
-              <PlanCard plan={plan} index={index} />
+        <Reveal delay={0.12} className="mt-7">
+          <PlanAdvisorHint />
+        </Reveal>
+
+        {/* En escritorio, cada tarjeta ocupa 9 filas compartidas (subgrid): los bloques quedan alineados entre planes. */}
+        <RevealGroup as="ul" className="mx-auto mt-12 grid max-w-xl gap-5 sm:mt-14 lg:max-w-none lg:grid-cols-3 lg:gap-x-4 lg:gap-y-0 xl:gap-x-5">
+          {plans.map((plan) => (
+            <RevealItem as="li" key={plan.id} className="h-full lg:row-span-9 lg:grid lg:grid-rows-subgrid">
+              <PlanCard plan={plan} />
             </RevealItem>
           ))}
         </RevealGroup>

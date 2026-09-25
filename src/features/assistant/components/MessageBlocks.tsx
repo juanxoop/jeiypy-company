@@ -2,10 +2,11 @@
 
 import { ArrowIcon } from "@/components/icons/ArrowIcon";
 import { CheckIcon, ChannelIcon } from "@/components/icons/BrandIcons";
+import { FeatureIcon } from "@/components/icons/FeatureIcon";
 import { isWhatsAppConfigured, getContactHref } from "@/lib/contact";
 import { cn } from "@/lib/cn";
 import { getAiTier, getPlan } from "../knowledge";
-import type { MessageBlock } from "../types";
+import type { MessageBlock, RecommendationBlock } from "../types";
 import { ContactLinks, FallbackLeadForm } from "./Fallback";
 import { InlineBold, RichText } from "./RichText";
 
@@ -78,76 +79,207 @@ function Block({ block, actions }: { block: MessageBlock; actions: BlockActions 
   }
 }
 
-function RecommendationCard({
-  block,
-  actions,
-}: {
-  block: Extract<MessageBlock, { type: "recommendation" }>;
-  actions: BlockActions;
-}) {
+function CardLabel({ children }: { children: React.ReactNode }) {
+  return <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-mist/85">{children}</p>;
+}
+
+/**
+ * Recommendation Card: la recomendación de Jeipy AI distribuida en bloques cortos, en lugar de un
+ * párrafo largo. Todo su contenido viene del diagnóstico de la conversación (ver recommend.ts).
+ * Sus botones envían un mensaje al chat: la decisión sigue dentro de la conversación.
+ */
+function RecommendationCard({ block, actions }: { block: RecommendationBlock; actions: BlockActions }) {
   const plan = getPlan(block.planId);
   const aiTier = block.aiTier ? getAiTier(block.aiTier) : undefined;
+  const alternative = block.variant === "alternative";
+  const premium = block.planId === "premium";
+  const name = `${plan.name}${aiTier ? ` + ${aiTier.name}` : ""}`;
+
   return (
-    <div className="jp-gradient-border relative overflow-hidden rounded-2xl bg-[linear-gradient(165deg,#0e1a33,#0a1224_55%,#080b12)] p-4">
-      <div aria-hidden className="absolute -top-10 -right-10 size-28 rounded-full bg-jeipy/25 blur-2xl" />
+    <section
+      aria-label={`${block.title}: ${name}`}
+      className={cn(
+        "relative overflow-hidden rounded-2xl p-4",
+        alternative
+          ? "border border-line-strong bg-[linear-gradient(170deg,#101726,#0a0e16_60%)]"
+          : "jp-gradient-border bg-[linear-gradient(165deg,#0e1a33,#0a1224_55%,#080b12)]",
+      )}
+    >
+      {!alternative && <div aria-hidden className="absolute -top-10 -right-10 size-28 rounded-full bg-jeipy/25 blur-2xl" />}
       <div className="relative">
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-glow">Tu recomendación está lista</p>
-        <p className="mt-2 flex flex-wrap items-baseline gap-x-2">
-          <span className="text-lg font-semibold tracking-[-0.02em] text-snow">
-            Plan {plan.name}
-            {aiTier && <span className="text-glow"> + {aiTier.name}</span>}
+        <p className={cn("font-mono text-[10px] uppercase tracking-[0.18em]", alternative ? "text-mist" : "text-glow")}>{block.title}</p>
+
+        {/* Plan y precio */}
+        <div className="mt-2.5 flex items-center gap-3">
+          <span
+            aria-hidden
+            className={cn(
+              "grid size-10 shrink-0 place-items-center rounded-xl",
+              alternative ? "border border-line-strong bg-white/[0.04] text-snow/85" : "border border-glow/30 bg-jeipy/15 text-glow",
+            )}
+          >
+            <FeatureIcon name={plan.focus.icon} className="size-5" />
           </span>
-          <span className="text-[13px] text-mist">
-            web desde {plan.price} {plan.currency}
-            {aiTier && ` · IA aparte, desde ${aiTier.setup.price} + mensualidad`}
-          </span>
-        </p>
+          <div className="min-w-0">
+            <p className="text-[19px] leading-tight font-semibold tracking-[-0.02em] text-snow">
+              {plan.name}
+              {aiTier && <span className="text-[15px] font-medium text-glow"> + {aiTier.name}</span>}
+            </p>
+            <p className="text-[13px] text-mist">
+              Desde <span className="font-medium text-snow">{plan.price}</span> {plan.currency}
+              {aiTier && (
+                <span className="block text-[12px] leading-snug">
+                  {aiTier.id === "custom"
+                    ? `IA aparte: desde ${aiTier.setup.price}, según alcance e integraciones`
+                    : `IA aparte: configuración desde ${aiTier.setup.price} + mensualidad según uso`}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
 
-        <p className="mt-3 text-[12px] font-medium text-mist/90">Por lo que me contaste</p>
-        <ul className="mt-1.5 space-y-1">
-          {block.because.map((item) => (
-            <li key={item} className="flex gap-2 text-[13px] leading-snug text-snow/85">
-              <span aria-hidden className="mt-[0.55em] size-1 shrink-0 rounded-full bg-glow/80" />
-              {item}
-            </li>
-          ))}
-        </ul>
+        <p className="mt-3 border-l-2 border-glow/40 pl-3 text-[13.5px] leading-snug text-snow/90">{block.tagline}</p>
 
-        <p className="mt-3 text-[12px] font-medium text-mist/90">Qué cubre</p>
-        <ul className="mt-1.5 space-y-1.5">
-          {block.covers.map((item) => (
-            <li key={item} className="flex gap-2 text-[13px] leading-snug text-snow/85">
-              <span className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full bg-jeipy/20 text-glow">
-                <CheckIcon className="size-2.5" />
-              </span>
-              {item}
-            </li>
-          ))}
-        </ul>
-
-        {block.alternative && (
-          <p className="mt-3 border-t border-white/[0.07] pt-3 text-[13px] leading-snug text-mist">
-            <span className="mr-1.5 font-medium text-snow/80">Qué cambiaría:</span>
-            {block.alternative}
+        {block.budget && (
+          <p
+            className={cn(
+              "mt-3 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium",
+              block.budget.fits ? "border-[#34d399]/30 bg-[#34d399]/10 text-[#a7f3d0]" : "border-[#ffb547]/35 bg-[#ffb547]/10 text-[#ffd9a0]",
+            )}
+          >
+            {block.budget.fits ? <CheckIcon className="size-3" /> : <span aria-hidden>!</span>}
+            {block.budget.text}
           </p>
         )}
+
+        {block.because?.length ? (
+          <div className="mt-4">
+            <CardLabel>Por qué te lo recomiendo</CardLabel>
+            <ul className="mt-2 space-y-1.5">
+              {block.because.map((item) => (
+                <li key={item} className="flex gap-2 text-[13.5px] leading-snug text-snow/90">
+                  <span aria-hidden className="mt-[0.5em] size-1.5 shrink-0 rounded-full bg-glow" />
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {block.highlights?.length ? (
+          <div className="mt-4">
+            <CardLabel>{premium ? "Lo que automatiza para tu negocio" : "Lo más importante para tu negocio"}</CardLabel>
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {block.highlights.map((h) => (
+                <li
+                  key={h.label}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border py-1 pr-2.5 pl-2 text-[12.5px] leading-snug text-snow/90",
+                    premium ? "border-glow/30 bg-[linear-gradient(160deg,rgb(23_105_255/0.2),rgb(23_105_255/0.06))]" : "border-white/[0.08] bg-white/[0.03]",
+                  )}
+                >
+                  <FeatureIcon name={h.icon} className="size-3.5 shrink-0 text-glow" />
+                  {h.label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {block.keeps?.length ? (
+          <div className="mt-4">
+            <CardLabel>Qué conservas</CardLabel>
+            <ul className="mt-2 space-y-1.5">
+              {block.keeps.map((item) => (
+                <li key={item} className="flex gap-2 text-[13.5px] leading-snug text-snow/90">
+                  <span className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full bg-jeipy/20 text-glow">
+                    <CheckIcon className="size-2.5" />
+                  </span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {block.later?.length ? (
+          <div className="mt-3.5">
+            <CardLabel>Para una segunda etapa</CardLabel>
+            <ul className="mt-2 space-y-1.5">
+              {block.later.map((item) => (
+                <li key={item} className="flex gap-2 text-[13.5px] leading-snug text-mist">
+                  <FeatureIcon name="followup" className="mt-0.5 size-4 shrink-0 text-mist/80" />
+                  {item}
+                </li>
+              ))}
+            </ul>
+            {block.meanwhile?.map((item) => (
+              <p key={item} className="mt-2 text-[12.5px] leading-snug text-mist/85">
+                {item}
+              </p>
+            ))}
+          </div>
+        ) : null}
+
+        {block.situation?.length ? (
+          <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+            <CardLabel>Tu situación actual</CardLabel>
+            <dl className="mt-2 space-y-1 text-[13px]">
+              {block.situation.map((row) => (
+                <div key={row.label} className="grid grid-cols-[5.75rem_1fr] gap-2">
+                  <dt className="text-mist">{row.label}</dt>
+                  <dd className="text-snow/90">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ) : null}
+
         {block.notes?.map((note) => (
-          <p key={note} className="mt-2 text-[12px] leading-snug text-mist/75">
+          <p key={note} className="mt-3 text-[12px] leading-snug text-mist/80">
             {note}
           </p>
         ))}
 
-        <p className="mt-3 text-[11px] text-mist/60">Recomendación orientativa: el alcance final se confirma con el equipo.</p>
-        <button
-          type="button"
-          onClick={() => actions.onNavigate("#planes")}
-          className="group mt-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3.5 text-[13px] text-snow transition-colors hover:border-glow/40"
-        >
-          Ver plan
-          <ArrowIcon className="size-3.5" />
-        </button>
+        {block.alternative && (
+          <details className="group/alt mt-3 text-[13px]">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded text-mist transition-colors hover:text-snow [&::-webkit-details-marker]:hidden">
+              ¿Y si tu necesidad cambia?
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden className="size-3.5 transition-transform group-open/alt:rotate-180">
+                <path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </summary>
+            <p className="mt-1.5 leading-snug text-mist">{block.alternative}</p>
+          </details>
+        )}
+
+        {block.actions?.length ? (
+          <div className="mt-4 flex flex-col gap-2">
+            {block.actions.map((action) => (
+              <button
+                key={action.label}
+                type="button"
+                onClick={() => actions.onSend(action.message)}
+                className={cn(
+                  "inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-full px-4 py-2 text-[13.5px] font-medium transition-colors",
+                  action.primary ? "bg-jeipy text-white hover:bg-[#2a76ff]" : "border border-line-strong text-snow hover:border-glow/40 hover:bg-white/[0.03]",
+                )}
+              >
+                {action.label}
+                {action.primary && <ArrowIcon className="size-3.5" />}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <p className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-mist/65">
+          Orientativo: el alcance final se confirma con el equipo.
+          <button type="button" onClick={() => actions.onNavigate("#planes")} className="rounded text-glow/90 underline-offset-2 hover:text-snow hover:underline">
+            Ver planes
+          </button>
+        </p>
       </div>
-    </div>
+    </section>
   );
 }
 

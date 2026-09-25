@@ -192,11 +192,6 @@ export function tierAdds(profile: Profile, lower: Tier, upper: Tier): string[] {
     .map((t) => TIER_ADDS[t as Exclude<Tier, "basico">]);
 }
 
-/** "quedaría" / "quedarían" según lo que se nombra. */
-export function plural(items: string[]): boolean {
-  return items.length > 1 || /^(las|los) /.test(items[0] ?? "");
-}
-
 /* ---------------------------------------------------------------
    Escalera y presupuesto
    --------------------------------------------------------------- */

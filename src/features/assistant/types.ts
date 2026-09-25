@@ -1,3 +1,4 @@
+import type { FeatureIconName } from "@/components/icons/FeatureIcon";
 import type { JeipyAiTierId } from "@/data/jeipyAi";
 import type { Plan } from "@/data/plans";
 import type { ContactChannel, LeadIntent, LeadSubmission } from "@/features/leads/types";
@@ -131,22 +132,47 @@ export type ConversationState = {
   pendingSubmission: boolean;
 };
 
+/**
+ * Tarjeta de recomendación: sustituye la explicación larga. Todo su contenido sale del diagnóstico real.
+ * - "recommended": el plan que más sentido tiene (o el ajustado al presupuesto).
+ * - "alternative": opción más económica tras una objeción (qué conserva y qué deja para después).
+ * - "confirmed": el visitante aceptó la alternativa; versión compacta para no repetir lo ya mostrado.
+ */
+export type RecommendationBlock = {
+  type: "recommendation";
+  variant: "recommended" | "alternative" | "confirmed";
+  planId: PlanId;
+  /** Nivel de Jeipy AI sugerido como complemento (se contrata aparte del plan web). */
+  aiTier?: AiTierId;
+  /** Encabezado de la tarjeta ("Plan recomendado", "Alternativa para reducir inversión"…). */
+  title: string;
+  /** Frase de valor en una línea. */
+  tagline: string;
+  /** "Por qué te lo recomiendo": respuestas del visitante, con sus palabras. */
+  because?: string[];
+  /** "Lo más importante para tu negocio": lo que el plan resuelve de lo que pidió. */
+  highlights?: { icon: FeatureIconName; label: string }[];
+  /** "Tu situación actual": solo datos que el visitante contó. */
+  situation?: { label: string; value: string }[];
+  /** Qué conserva y qué queda para una segunda etapa (alternativas y ajustes por presupuesto). */
+  keeps?: string[];
+  later?: string[];
+  /** Cómo se resuelve mientras tanto lo que queda para después (p. ej. citas por WhatsApp). */
+  meanwhile?: string[];
+  /** Relación con el presupuesto dicho por el visitante. */
+  budget?: { fits: boolean; text: string };
+  /** Costos de Jeipy AI y otras aclaraciones cortas. */
+  notes?: string[];
+  /** Qué tendría que cambiar para que otro plan tuviera más sentido. */
+  alternative?: string;
+  /** Botones de la tarjeta: envían ese mensaje a la conversación (no abren WhatsApp). */
+  actions?: { label: string; message: string; primary?: boolean }[];
+};
+
 export type MessageBlock =
   | { type: "text"; text: string }
   | { type: "list"; items: string[] }
-  | {
-      type: "recommendation";
-      planId: PlanId;
-      /** Nivel de Jeipy AI sugerido como complemento (se contrata aparte del plan web). */
-      aiTier?: AiTierId;
-      /** Respuestas del visitante que llevaron a la recomendación. */
-      because: string[];
-      /** Qué cubre el plan recomendado. */
-      covers: string[];
-      /** Qué tendría que cambiar para que otro plan tuviera más sentido. */
-      alternative?: string;
-      notes?: string[];
-    }
+  | RecommendationBlock
   | { type: "summary"; title: string; rows: { label: string; value: string }[] }
   /** "¿Cómo quieres continuar?": asesor por WhatsApp, solicitud de llamada y otra duda. */
   | { type: "closing"; title: string; whatsappMessage: string; offerCallback: boolean }

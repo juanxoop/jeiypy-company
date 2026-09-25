@@ -38,6 +38,7 @@ import {
   normalize,
   parseAiLevelAnswer,
   parseYesNo,
+  businessKind,
   type Intent,
 } from "./nlu";
 import { CHANNEL_LABEL, FEATURE_LABEL, GOAL_LABEL, needsLabels, presenceLabel } from "@/features/leads/labels";
@@ -52,7 +53,7 @@ import {
   tierCost,
   type Tier,
 } from "./ladder";
-import { aiCostNote, needsAiLevelQuestion, pickTier, recommendPlan } from "./recommend";
+import { aiCostNote, alternativeCard, needsAiLevelQuestion, pickTier, recommendPlan } from "./recommend";
 import type {
   AiTierId,
   AssistantBrain,
@@ -64,6 +65,7 @@ import type {
   MessageBlock,
   PlanId,
   Profile,
+  RecommendationBlock,
   Slot,
 } from "./types";
 
@@ -84,18 +86,6 @@ const CHIPS = {
    --------------------------------------------------------------- */
 
 const slotKey = (slot: Slot) => (slot.kind === "feature" ? `feature:${slot.feature}` : slot.kind);
-
-function businessKind(profile: Profile): "food" | "retail" | "service" {
-  const t = normalize(profile.businessType ?? "");
-  if (/restaurante|cafe|panaderia|pasteleria|comidas|cafeteria/.test(t)) return "food";
-  if (
-    /tienda|boutique|venta|ferreteria|joyeria|optica|drogueria|papeleria|floristeria|miscelanea|minimercado|supermercado|repuesto|calzado|ropa|accesorio|bisuteria|cosmetic|perfum|mueble|mascota|celular|tecnologia|licorera|carniceria|fruver/.test(t) ||
-    profile.goal === "sell" ||
-    profile.channels?.includes("ecommerce")
-  )
-    return "retail";
-  return "service";
-}
 
 /** Siguiente dato que falta. El diagnóstico nunca repite lo que ya se sabe. */
 function nextSlot(state: ConversationState): Slot | null {
@@ -653,24 +643,33 @@ function startContact(flow: "lead" | "callback", state: ConversationState, intro
    Recomendación
    --------------------------------------------------------------- */
 
-function recommend(state: ConversationState, lead: MessageBlock[] = [], cap?: Tier): Reply {
-  const { needsHuman, verdict, tier, ideal, ...recommendation } = recommendPlan(state.profile, cap ?? state.planCap);
+/**
+ * Recomendación como tarjeta estructurada: una frase corta la presenta y la tarjeta sustituye la
+ * explicación larga (no se repite su contenido en texto). `confirmed`: el visitante acaba de aceptar
+ * una alternativa que ya vio en detalle, así que la tarjeta va en versión compacta.
+ */
+function recommend(state: ConversationState, lead: MessageBlock[] = [], cap?: Tier, { confirmed = false } = {}): Reply {
+  const { needsHuman, intro, tier, ideal, ...card } = recommendPlan(state.profile, cap ?? state.planCap);
   const lower = nextLowerTier(state.profile, tier);
   const next: ConversationState = {
     ...state,
     expecting: null,
-    recommended: recommendation.planId,
-    recommendedAi: recommendation.aiTier,
+    recommended: card.planId,
+    recommendedAi: card.aiTier,
     comparePair: tier !== ideal ? [ideal, tier] : lower ? [tier, lower] : state.comparePair,
     retries: 0,
   };
-  const blocks: MessageBlock[] = [...lead, text(verdict), recommendation];
+  const recommendation: RecommendationBlock = confirmed
+    ? { type: "recommendation", variant: "confirmed", planId: card.planId, aiTier: card.aiTier, title: "Tu plan para empezar", tagline: card.tagline, budget: card.budget, notes: card.notes }
+    : card;
 
   // Presupuesto por debajo del plan de entrada: opciones honestas y, ahora sí, el equipo.
   if (needsHuman) {
     return {
       blocks: [
-        ...blocks,
+        ...lead,
+        text(intro),
+        recommendation,
         text("Para que igual puedas avanzar, estas son las opciones:"),
         { type: "list", items: BUDGET_OPTIONS },
         closingBlock(next),
@@ -682,15 +681,19 @@ function recommend(state: ConversationState, lead: MessageBlock[] = [], cap?: Ti
 
   // En cotización, tras recomendar se piden los datos para preparar la propuesta.
   if (state.flow === "quote") {
-    return startContact("lead", next, "Para preparar tu cotización necesito unos pocos datos.", blocks);
+    return startContact("lead", next, "Para preparar tu cotización necesito unos pocos datos.", [...lead, ...(confirmed ? [] : [text(intro)]), recommendation]);
   }
 
-  // Cierre comercial: asesor ahora o solicitud de llamada, con el mismo protagonismo.
-  // Las sugerencias solo aceleran: el visitante puede escribir lo que quiera.
+  // La tarjeta lleva la decisión principal ("Quiero este plan" pide los datos aquí mismo, sin saltar a
+  // WhatsApp) y la alternativa más económica. El asesor y la llamada quedan a un toque en las sugerencias.
+  recommendation.actions = [
+    { label: "Quiero este plan", message: "Quiero este plan", primary: true },
+    ...(lower ? [{ label: "Ver alternativa más económica", message: "Algo más económico" }] : []),
+  ];
   return {
-    blocks: [...blocks, closingBlock(next)],
-    quickReplies: lower ? ["Algo más económico", "¿Qué incluye exactamente?"] : ["¿Qué incluye exactamente?"],
-    state: { ...next, flow: "free", handoffOffered: true },
+    blocks: [...lead, ...(confirmed ? [] : [text(intro)]), recommendation],
+    quickReplies: ["Hablar con un asesor", ...(state.callbackRequested ? [] : ["Quiero que me llamen"]), "¿Qué incluye exactamente?"],
+    state: { ...next, flow: "free" },
   };
 }
 
@@ -791,25 +794,21 @@ function offerCheaper(state: ConversationState, kind: "price" | "scope", from?: 
   const lower = nextLowerTier(state.profile, current);
   if (!lower) return entryOptions(state);
 
-  const cov = coverage(state.profile, lower);
-  const ack = from ? "Entiendo." : kind === "price" ? "Entiendo. Podemos simplificar la solución." : "Tiene sentido empezar con lo necesario.";
-  const budget = state.profile.budget && state.profile.budget !== "skipped" ? state.profile.budget.amount : undefined;
-  const blocks: MessageBlock[] = [
-    text(
-      `${ack} Por lo que me contaste, podrías comenzar con **${tierLabel(lower)}** (${tierPriceText(lower)})${
-        cov.lost.length ? ` y dejar ${joinNatural(cov.lost)} para una segunda etapa` : ""
-      }. Mantendrías ${joinNatural(cov.kept)}.`,
-    ),
+  const ack = from
+    ? "Entiendo. Bajemos un nivel más:"
+    : kind === "price"
+      ? "Entiendo, la inversión importa. Podemos simplificar la solución sin perder lo principal:"
+      : "Tiene sentido empezar con lo necesario. Esta sería la base:";
+  const card = alternativeCard(state.profile, lower);
+  card.actions = [
+    { label: "Me interesa esta alternativa", message: "Sí, me interesa", primary: true },
+    ...(lower !== "basico" ? [{ label: "Sigue siendo alto", message: "Sigue siendo alto" }] : []),
   ];
-  if (cov.workarounds.length) blocks.push(text(cov.workarounds.join(" ")));
-  if (budget !== undefined && tierCost(lower) > budget) {
-    blocks.push(text(`Aun así, estaría por encima de tu presupuesto de ${formatCop(budget)}.`));
-  }
+  // La tarjeta ya pregunta con sus botones; el visitante también puede responder con sus palabras.
   const slot: Slot = { kind: "confirm-plan", tier: lower, from: current };
-  const q = question(slot, state);
   return {
-    blocks: [...blocks, ...q.blocks],
-    quickReplies: q.quickReplies,
+    blocks: [text(ack), card],
+    quickReplies: ["¿Cuál es la diferencia?"],
     state: { ...state, expecting: slot, comparePair: [current, lower], retries: 0 },
   };
 }
@@ -1232,7 +1231,7 @@ export function respond(input: string, current: ConversationState): Reply {
       }
       const answer = parseYesNo(input) ?? (t.includes(" me interesa") || t.includes(" me sirve") || t.includes(" ver ") ? "yes" : undefined);
       if (answer === "yes") {
-        return recommend({ ...base, planCap: slot.tier }, [text("Perfecto, ajustemos la propuesta.")], slot.tier);
+        return recommend({ ...base, planCap: slot.tier }, [text("Perfecto, ajustemos la propuesta. Así quedaría:")], slot.tier, { confirmed: true });
       }
       if (answer === "no" || t.includes(" lo mantengo")) {
         if (!current.recommended) return recommend(base, [text("Perfecto, mantengamos la opción completa.")]);
@@ -1387,7 +1386,7 @@ export function respond(input: string, current: ConversationState): Reply {
       "lead",
       current,
       intent.type === "advance" && current.recommended
-        ? `Excelente decisión. Para que el equipo prepare tu propuesta de ${getPlan(current.recommended).name}, necesito unos pocos datos.`
+        ? `Excelente decisión. Para que el equipo prepare tu propuesta de ${tierLabel(tierOf(current.recommended, current.recommendedAi))}, necesito unos pocos datos.`
         : "Perfecto. Para que el equipo te contacte, necesito unos pocos datos.",
     );
   }

@@ -153,7 +153,15 @@ src/features/assistant/
 - **Mencionar "IA" no lleva a Premium.** Decide el **nivel de IA** (`aiLevel`): básico (dudas, orientación, datos) o avanzado (gestionar, clasificar, automatizar). Se deduce del texto o se pregunta.
 - **Desempate:** si quiere IA y no hay otra señal de Premium, pregunta antes de elegir: "¿Quieres que la IA solo responda dudas y capture información, o también que automatice reservas, cotizaciones o procesos?".
 - **Si describe su negocio en un mensaje** (aunque mencione IA), lo toma como información del diagnóstico. Solo una pregunta directa ("¿qué hace Jeipy AI?") recibe la explicación general.
-- **Cada recomendación explica:** 1) el plan; 2) "Por lo que me contaste" (sus respuestas; en Premium, primero las de automatización); 3) "Qué cubre"; 4) "Qué cambiaría" para que otro plan tuviera más sentido.
+- **Recommendation Card:** la recomendación se presenta como tarjeta estructurada, precedida por una sola frase corta. La tarjeta sustituye la explicación larga: su contenido no se repite en texto. Bloques (`RecommendationBlock` en `types.ts`, contenido en `recommend.ts`):
+  1. Plan recomendado, precio "desde" y, si aplica, Jeipy AI (configuración + mensualidad, aparte).
+  2. Frase de valor. En Premium deja claro que no es "una web más grande".
+  3. **Por qué te lo recomiendo:** respuestas del visitante que el plan cubre de verdad (en Premium, primero las de automatización).
+  4. **Lo más importante para tu negocio:** lo que el plan resuelve de lo que pidió, en chips con icono. En Premium: automatización, Jeipy AI, captación, seguimiento e integraciones, según lo detectado.
+  5. **Tu situación actual:** negocio, presencia, web y objetivo, solo con lo que contó.
+  6. Presupuesto (si lo dio): "Entra en tu presupuesto" o "Ajustado a tu presupuesto". Si la recomendación se ajustó, también "Qué conservas" y "Para una segunda etapa".
+  7. "¿Y si tu necesidad cambia?" (desplegable) y los botones **Quiero este plan** (pide los datos en el chat, no abre WhatsApp) y **Ver alternativa más económica** (si hay un nivel inferior).
+  Tras la tarjeta, las sugerencias ofrecen "Hablar con un asesor", "Quiero que me llamen" y "¿Qué incluye exactamente?". En una cotización la tarjeta va sin botones y enseguida se piden los datos.
 
 **Precios de Jeipy AI:** el asistente separa siempre tres conceptos: el precio del plan web, la configuración inicial de Jeipy AI (pago único) y la operación mensual (uso, mantenimiento, actualizaciones, soporte y optimización). Básico no incluye IA; Esencial es compatible con Lite; Premium con Pro; Custom es para proyectos especiales. Ningún plan incluye la IA en su precio.
 
@@ -179,9 +187,9 @@ src/features/assistant/
 **Escalera comercial** (objeción de precio o alcance): `Premium → Esencial + Jeipy AI Lite → Esencial → Básico`. Esencial + Lite solo aparece si el visitante quiere IA.
 1. Reconoce la objeción en una frase ("Podemos simplificar la solución").
 2. Revisa las necesidades ya detectadas.
-3. Propone el siguiente nivel con su precio.
-4. Explica qué se mantiene y qué queda para una segunda etapa, con alternativas honestas: por ejemplo, reservas por formulario o WhatsApp, pero sin agenda automática.
-5. Pregunta "¿Te interesa esta alternativa?": "Sí, me interesa" (o cualquier sí), "Sigue siendo alto" (baja otro peldaño) o "¿Cuál es la diferencia?".
+3. Propone el siguiente nivel en una tarjeta **"Alternativa para reducir inversión"**: plan y precio, por qué puede ser buena forma de empezar, **qué conservas** y **qué queda para una segunda etapa**, con alternativas honestas (por ejemplo, reservas por formulario o WhatsApp, pero sin agenda automática). Nunca inventa descuentos.
+4. Botones "Me interesa esta alternativa" y "Sigue siendo alto" (baja otro peldaño), más la sugerencia "¿Cuál es la diferencia?". También entiende cualquier respuesta escrita.
+5. Si la acepta, muestra una tarjeta compacta "Tu plan para empezar" con el botón "Quiero este plan", sin repetir lo que ya vio.
 6. Solo en el plan de entrada ofrece opciones (reducir alcance, etapas, asesor) junto con el cierre comercial.
 
 El nivel aceptado queda como tope (`planCap`) y las recomendaciones siguientes lo respetan. Nunca promete funciones que el nivel no incluye. Prefiere cerrar un Básico bien explicado antes que perder al cliente insistiendo en Premium.
@@ -195,7 +203,7 @@ El nivel aceptado queda como tope (`planCap`) y las recomendaciones siguientes l
 
 **Texto libre:** las sugerencias rápidas solo aceleran la conversación. Cualquier mensaje se interpreta con el contexto: presupuesto, negaciones ("no quiero…"), cambios de opinión ("ahora sí quiero reservas"), dudas y objeciones, también a mitad del diagnóstico, sin reiniciarlo ni repetir preguntas ya respondidas.
 
-**Cierre comercial:** tras la recomendación aparece "Tu recomendación está lista" y "¿Cómo quieres continuar?", con dos opciones del mismo peso:
+**Cierre comercial:** la tarjeta lleva la decisión ("Quiero este plan"). Cuando el visitante pide una persona ("Hablar con un asesor") aparece "¿Cómo quieres continuar?", con dos opciones del mismo peso:
 - **Hablar ahora con un asesor:** abre WhatsApp con un mensaje breve (nombre, negocio, plan recomendado y necesidad principal), sin teléfono ni correo en la URL. Si no hay número configurado, inicia la solicitud de llamada.
 - **Quiero que me llamen:** confirma el nombre y el teléfono (o los pide), pide el nombre del negocio si falta y un horario opcional, y envía con `callbackRequested = true`.
 - **Tengo otra duda** (secundaria): vuelve a la conversación.
