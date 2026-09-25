@@ -4,7 +4,7 @@ import { AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { Component, useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
-import { hasPendingLead, retryPendingLead } from "@/features/leads/client";
+import { beaconPendingLead, hasPendingLead, retryPendingLead } from "@/features/leads/client";
 import { assistantConfig } from "@/config/assistant";
 import { cn } from "@/lib/cn";
 import { OPEN_ASSISTANT_EVENT, type OpenAssistantDetail } from "../open";
@@ -57,10 +57,12 @@ function usePendingLeadSync() {
     const first = window.setTimeout(sync, 4_000);
     const interval = window.setInterval(sync, 60_000);
     window.addEventListener("online", sync);
+    window.addEventListener("pagehide", beaconPendingLead);
     return () => {
       window.clearTimeout(first);
       window.clearInterval(interval);
       window.removeEventListener("online", sync);
+      window.removeEventListener("pagehide", beaconPendingLead);
     };
   }, []);
 }

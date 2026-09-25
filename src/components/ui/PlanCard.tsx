@@ -52,7 +52,8 @@ export function PlanCard({ plan, index }: { plan: Plan; index: number }) {
             </span>
             <span className="font-mono text-xs text-mist">{plan.currency}</span>
           </p>
-          <p className="mt-4 text-[15px] leading-relaxed text-mist lg:min-h-[3lh]">{plan.summary}</p>
+          <p className={cn("mt-4 text-[15px] font-medium tracking-[-0.01em]", featured ? "text-glow" : "text-snow")}>{plan.positioning}</p>
+          <p className="mt-1.5 text-[15px] leading-relaxed text-mist lg:min-h-[4lh]">{plan.summary}</p>
         </header>
 
         <div aria-hidden className="my-6 h-px bg-[linear-gradient(90deg,rgb(245_247_250/0.1),rgb(245_247_250/0.03))]" />

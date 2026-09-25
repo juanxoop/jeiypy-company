@@ -136,10 +136,15 @@ export function pickAiTier(profile: Profile, tier: Tier): AiTierId | undefined {
 }
 
 const WEB_COVERS: Record<Tier, string[]> = {
-  basico: ["Página informativa con diseño responsive", "WhatsApp, ubicación y contacto", "Información y servicios principales del negocio"],
-  esencial: ["Web completa con varias secciones", "Catálogo de productos o servicios", "Formularios, SEO básico y Analytics", "Integración con WhatsApp y optimización"],
+  basico: ["Web profesional con diseño responsive", "Contacto, WhatsApp y ubicación", "Información y servicios principales del negocio"],
+  esencial: ["Web comercial orientada a captación", "Catálogo de productos o servicios", "Formularios, SEO básico y Analytics", "Estructura para captar oportunidades"],
   "esencial-ai": ["Todo lo del Esencial: web completa, catálogo, formularios, SEO básico y Analytics"],
-  premium: ["Diseño y desarrollo personalizado", "Reservas, flujos e integraciones según el proyecto", "Soporte, acompañamiento y actualizaciones"],
+  premium: [
+    "Solución digital comercial y automatizada, a la medida",
+    "Captación y seguimiento de oportunidades, flujos comerciales y reservas según el proyecto",
+    "Integraciones, funciones personalizadas y CRM/seguimiento cuando aplique",
+    "Soporte y acompañamiento",
+  ],
 };
 
 const AI_COVERS: Record<AiTierId, string> = {

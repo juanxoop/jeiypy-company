@@ -1,6 +1,6 @@
 /**
- * Planes comerciales.
- * Precios orientativos: el valor final se define con cada proyecto.
+ * Planes comerciales: única fuente de precios para la web, Jeipy AI, recomendaciones y resúmenes.
+ * Precios "desde": el valor final depende del alcance de cada proyecto.
  */
 
 /** Cómo se relaciona cada plan con Jeipy AI. */
@@ -22,6 +22,8 @@ export type PlanCtaIntent = "start" | "choose" | "talk";
 export type Plan = {
   id: "basico" | "esencial" | "premium";
   name: string;
+  /** Promesa del plan en una línea (lo que el cliente compra, no "una página más cara"). */
+  positioning: string;
   price: string;
   currency: string;
   summary: string;
@@ -42,16 +44,17 @@ export const plans: Plan[] = [
   {
     id: "basico",
     name: "Básico",
-    price: "$600.000",
+    positioning: "Presencia digital profesional",
+    price: "$999.900",
     currency: "COP",
-    summary: "Una página profesional y clara para empezar tu presencia digital con una base sólida.",
+    summary: "Una web profesional para que tu negocio se vea sólido, se entienda rápido y sea fácil de contactar.",
     features: [
-      "Página web informativa",
+      "Web profesional",
       "Diseño responsive",
       "Información del negocio",
-      "Integración con WhatsApp",
-      "Ubicación y contacto",
-      "Estructura visual profesional",
+      "Contacto y WhatsApp",
+      "Ubicación",
+      "Presencia digital sólida",
       "Optimización básica de rendimiento",
     ],
     ai: { mode: "none", note: "Ideal para comenzar tu presencia digital." },
@@ -60,17 +63,18 @@ export const plans: Plan[] = [
   {
     id: "esencial",
     name: "Esencial",
-    price: "$1.000.000",
+    positioning: "Web comercial orientada a captación",
+    price: "$2.399.000",
     currency: "COP",
-    summary: "Una web más completa, con herramientas para mostrar lo que ofreces y captar clientes.",
+    summary: "Una web pensada para vender: muestra lo que ofreces y convierte visitas en oportunidades de negocio.",
     features: [
-      "Sitio web más completo",
-      "Varias secciones",
       "Catálogo de productos o servicios",
       "Formularios de contacto o cotización",
       "SEO básico y Analytics",
+      "Estructura comercial",
+      "Captación de oportunidades",
       "Integración con WhatsApp",
-      "Velocidad y experiencia optimizadas",
+      "Funciones más avanzadas",
       "Diseño responsive",
     ],
     ai: {
@@ -86,20 +90,20 @@ export const plans: Plan[] = [
   {
     id: "premium",
     name: "Premium",
-    price: "$1.500.000",
+    positioning: "Solución digital comercial y automatizada",
+    price: "$4.699.000",
     currency: "COP",
-    summary: "Una solución personalizada y automatizada, preparada para acompañar tu crecimiento.",
+    summary: "No es una página más cara: es una herramienta que capta, organiza y da seguimiento a tus oportunidades. Incluye según el alcance:",
     features: [
-      "Diseño web avanzado",
-      "Desarrollo personalizado",
-      "Catálogo avanzado",
-      "Formularios y flujos a medida",
-      "Integraciones",
-      "SEO básico y Analytics",
-      "Optimización avanzada",
+      "Automatización de procesos",
+      "Captación y seguimiento de oportunidades",
+      "Integraciones con tus herramientas",
+      "Flujos comerciales a medida",
+      "Funciones personalizadas",
+      "Herramientas internas",
+      "CRM y seguimiento cuando aplique",
+      "Diseño y desarrollo a la medida",
       "Soporte y acompañamiento",
-      "Actualizaciones",
-      "Diseño responsive",
     ],
     ai: {
       mode: "featured",

@@ -24,6 +24,11 @@ export const leadsConfig = {
       .filter(Boolean),
     webhookUrl: env("LEADS_ALERT_WEBHOOK_URL"),
   },
+  /**
+   * Respaldo independiente de Resend: si Supabase falla, el lead completo se envía a este webhook
+   * (Slack, Discord, Make, Zapier, Google Apps Script…). Por defecto, el mismo de las alertas.
+   */
+  backupWebhookUrl: env("LEADS_BACKUP_WEBHOOK_URL") ?? env("LEADS_ALERT_WEBHOOK_URL"),
   /** Token para que un monitor externo consulte /api/health (Authorization: Bearer <token>). */
   healthToken: env("HEALTHCHECK_TOKEN"),
   resend: {

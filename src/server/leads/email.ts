@@ -25,6 +25,7 @@ export function renderLeadEmail(lead: LeadRecord, id?: string) {
     ["Presencia digital", presenceLabel(lead.channels, lead.websiteStatus) ?? "—"],
     ["Necesita", lead.needs.join(" + ") || "—"],
     ["Interés en IA", lead.aiInterest ? `Sí${lead.aiLevel === "advanced" ? " · automatización avanzada" : " · atención básica"}` : "No por ahora"],
+    ["Presupuesto", lead.budget ? `$${lead.budget.toLocaleString("es-CO")} COP` : "No indicado"],
     ["Recomendación", recommendationLabel(lead) ?? "—"],
     ["Solicita llamada", lead.callbackRequested ? `Sí${lead.preferredTime ? ` · ${lead.preferredTime}` : ""}` : "No"],
   ];

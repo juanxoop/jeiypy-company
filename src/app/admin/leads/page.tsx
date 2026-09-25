@@ -58,9 +58,9 @@ export default async function LeadsInboxPage({ searchParams }: { searchParams: P
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <a href="/api/health" target="_blank" rel="noopener noreferrer" className="h-10 content-center rounded-full border border-line-strong px-4 text-sm text-mist hover:border-glow/40 hover:text-snow">
+          <Link href="/admin/sistema" className="h-10 content-center rounded-full border border-line-strong px-4 text-sm text-mist hover:border-glow/40 hover:text-snow">
             Estado del sistema
-          </a>
+          </Link>
           <form action={logout}>
             <button type="submit" className="h-10 rounded-full border border-line-strong px-4 text-sm text-mist hover:border-glow/40 hover:text-snow">
               Cerrar sesión

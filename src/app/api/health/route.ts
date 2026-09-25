@@ -3,8 +3,8 @@ import { isAdmin } from "@/server/admin/auth";
 import { safeEqual } from "@/server/admin/session";
 import { recentFailureCount, reportPersistenceFailure } from "@/server/leads/alerts";
 import { leadsConfig } from "@/server/leads/config";
-import { isEmailConfigured } from "@/server/leads/notify";
-import { isRateLimited } from "@/server/leads/rate-limit";
+import { configurationChecks, fallbackSummary } from "@/server/leads/status";
+import { LIMITS, isRateLimited } from "@/server/leads/rate-limit";
 import { storeHealth, storeWriteCheck } from "@/server/leads/store";
 
 /**
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   if (!tokenOk && !(await isAdmin())) return Response.json({ error: "unauthorized" }, { status: 401 });
 
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-  if (isRateLimited(`health:${ip}`)) return Response.json({ error: "rate-limited" }, { status: 429 });
+  if (isRateLimited(`health:${ip}`, LIMITS.health)) return Response.json({ error: "rate-limited" }, { status: 429 });
 
   const requestId = crypto.randomUUID().slice(0, 8);
   const [read, write] = await Promise.all([storeHealth(), storeWriteCheck()]);
@@ -43,8 +43,9 @@ export async function GET(request: NextRequest) {
         read: read.ok ? "ok" : read.reason,
         write: write.ok ? `ok (${write.latencyMs} ms)` : write.reason,
       },
-      email: isEmailConfigured() ? "configurado" : "no configurado",
-      alerts: leadsConfig.alerts.webhookUrl || (leadsConfig.alerts.recipients.length && leadsConfig.resend.apiKey) ? "configuradas" : "sin canal",
+      persistence: read.ok && write.ok ? "ok" : "falla",
+      fallback: fallbackSummary(),
+      configuration: configurationChecks().map(({ label, ok, detail, level }) => ({ label, ok, detail, level })),
       recentPersistenceFailures: recentFailureCount(),
     },
     { status: ok ? 200 : 503, headers: { "Cache-Control": "no-store" } },

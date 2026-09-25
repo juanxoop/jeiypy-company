@@ -22,7 +22,7 @@ export type PersistenceFailure = {
   reason: string;
   /** Lead afectado (solo nombre y teléfono, para poder contactarlo si no hubo respaldo). */
   lead?: { name: string; phone: string };
-  backup?: "email" | "none";
+  backup?: "email" | "webhook" | "none";
 };
 
 export function recentFailureCount(now = Date.now()): number {
@@ -36,7 +36,7 @@ export async function reportPersistenceFailure(failure: PersistenceFailure): Pro
   const count = recentFailureCount(now);
   console.error(`[leads-alert] Falla de persistencia (${failure.source}, ref ${failure.requestId}, ${count} en 15 min): ${failure.reason}`);
 
-  const leadAtRisk = failure.source === "lead" && failure.backup !== "email";
+  const leadAtRisk = failure.source === "lead" && failure.backup === "none";
   if ((count < THRESHOLD && !leadAtRisk) || now - lastAlertAt < COOLDOWN_MS) return;
   lastAlertAt = now;
 
@@ -44,7 +44,9 @@ export async function reportPersistenceFailure(failure: PersistenceFailure): Pro
     `⚠️ Jeipy AI: fallas guardando leads en Supabase (${count} en los últimos 15 minutos).`,
     `Última falla: ${failure.reason} (ref ${failure.requestId}).`,
     failure.lead
-      ? `Lead afectado: ${failure.lead.name} · ${failure.lead.phone} · ${failure.backup === "email" ? "llegó por correo de respaldo" : "SIN respaldo: contáctalo directamente"}.`
+      ? `Lead afectado: ${failure.lead.name} · ${failure.lead.phone} · ${
+          failure.backup === "email" ? "llegó por correo de respaldo" : failure.backup === "webhook" ? "llegó por el webhook de respaldo" : "SIN respaldo: contáctalo directamente"
+        }.`
       : undefined,
     `Revisa ${siteConfig.url}/api/health y los registros del servidor en Vercel.`,
   ].filter(Boolean) as string[];

@@ -65,7 +65,7 @@ export type LeadSubmission = {
   transcript?: TranscriptEntry[];
   /** Ya se había enviado un lead en esta conversación: la notificación se marca como actualización. */
   isUpdate?: boolean;
-  /** Reintento de un lead que ya llegó al equipo por el correo de respaldo: no se vuelve a enviar el correo. */
+  /** Reintento de un lead que ya llegó al equipo por un canal de respaldo: no se vuelve a enviar. */
   backupNotified?: boolean;
 };
 
@@ -92,7 +92,8 @@ export type LeadSubmitResult =
       ok: false;
       error: "invalid" | "rate-limited" | "not-configured" | "failed";
       requestId?: string;
-      backup?: "email" | "none";
+      /** Canal de respaldo que confirmó el lead cuando Supabase falló ("none": ninguno). */
+      backup?: "email" | "webhook" | "none";
     };
 
 /** Lead tal como lo guarda la base de datos (lo que lee la bandeja /admin/leads). */

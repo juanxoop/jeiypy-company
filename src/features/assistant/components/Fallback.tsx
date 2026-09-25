@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { ChannelIcon } from "@/components/icons/BrandIcons";
 import { getCallHref, getContactHref, isWhatsAppConfigured } from "@/lib/contact";
 import { cn } from "@/lib/cn";
-import { submitLead } from "@/features/leads/client";
+import { isLeadSecured, submitLead } from "@/features/leads/client";
 import { initialConversationState, type LeadDraft } from "../types";
 import { AssistantOrb } from "./AssistantOrb";
 
@@ -42,7 +42,7 @@ export function ContactLinks({ whatsappMessage, className }: { whatsappMessage?:
   );
 }
 
-type Status = { kind: "idle" } | { kind: "sending" } | { kind: "ok" } | { kind: "failed"; byEmail: boolean };
+type Status = { kind: "idle" } | { kind: "sending" } | { kind: "ok" } | { kind: "failed" };
 
 /** Formulario mínimo: nombre, teléfono y qué necesita. Usa el mismo envío real que el asistente. */
 export function FallbackLeadForm() {
@@ -80,7 +80,7 @@ export function FallbackLeadForm() {
       preferredChannel: callback ? "llamada" : "whatsapp",
     };
     const result = await submitLead(draft, []);
-    setStatus(result.ok ? { kind: "ok" } : { kind: "failed", byEmail: !result.ok && result.backup === "email" });
+    setStatus(isLeadSecured(result) ? { kind: "ok" } : { kind: "failed" });
   };
 
   if (status.kind === "ok") {
@@ -110,9 +110,8 @@ export function FallbackLeadForm() {
       {error && <p className="text-[13px] text-[#ff8a8a]">{error}</p>}
       {status.kind === "failed" && (
         <p role="status" className="rounded-xl border border-line-strong bg-white/[0.03] p-3 text-[13px] text-mist">
-          {status.byEmail
-            ? "Nuestro sistema principal tuvo una falla, pero tus datos llegaron al equipo por correo. Los guardé en este navegador para reintentar."
-            : "No pudimos enviar tu solicitud. Guardé tus datos en este navegador y lo intentaremos de nuevo; también puedes escribirnos o llamarnos."}
+          Estamos teniendo una dificultad temporal para enviar tu solicitud. Tus datos siguen preparados para reintentar. Puedes intentarlo nuevamente o
+          escribirnos y llamarnos directamente.
         </p>
       )}
       <button

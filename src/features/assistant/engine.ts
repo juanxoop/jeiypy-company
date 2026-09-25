@@ -173,7 +173,7 @@ function question(slot: Slot, state: ConversationState): { blocks: MessageBlock[
     case "budget":
       return {
         blocks: [text("¿Tienes un presupuesto aproximado? Es opcional, pero me ayuda a ajustar la recomendación.")],
-        quickReplies: ["Hasta $600.000", "Hasta $1.000.000", "Hasta $1.500.000", "Más de $1.500.000", "Prefiero no decirlo"],
+        quickReplies: ["Hasta $1.000.000", "Hasta $2.400.000", "Hasta $4.700.000", "Más de $4.700.000", "Prefiero no decirlo"],
       };
     case "aiLevel":
       return {
@@ -564,19 +564,29 @@ function submitLead(state: ConversationState, lead: MessageBlock[] = []): Reply 
  * Respuesta al resultado real del envío. Solo confirma la recepción si el backend
  * guardó o notificó el lead; si no, lo dice con honestidad y ofrece alternativas.
  */
-export function leadSubmissionResult(state: ConversationState, result: { ok: boolean; backup?: "email" | "none" }): AssistantTurn {
-  if (result.ok) {
+/**
+ * Respuesta al resultado real del envío. "Solicitud recibida" SOLO si al menos un mecanismo
+ * persistente confirmó el lead: la base de datos o un canal de respaldo (correo o webhook).
+ */
+export function leadSubmissionResult(
+  state: ConversationState,
+  result: { ok: boolean; backup?: "email" | "webhook" | "none" },
+): AssistantTurn {
+  const viaBackup = !result.ok && (result.backup === "email" || result.backup === "webhook");
+  if (result.ok || viaBackup) {
     const next: ConversationState = { ...state, flow: "free", expecting: null, pendingSubmission: false, leadCaptured: true, handoffOffered: true };
     const whatsapp = isWhatsAppConfigured();
+    const base = state.callbackRequested
+      ? "Ya tenemos tus datos. Un asesor de Jeipy podrá contactarte para hablar sobre tu proyecto."
+      : "Ya tenemos tus datos. El equipo de Jeipy revisará tu solicitud y te contactará para continuar con tu proyecto.";
     return {
       blocks: [
         {
           type: "lead-status",
           ok: true,
           title: "Solicitud recibida",
-          text: state.callbackRequested
-            ? "Ya tenemos tus datos. Un asesor de Jeipy podrá contactarte para hablar sobre tu proyecto."
-            : "Ya tenemos tus datos. El equipo de Jeipy revisará tu solicitud y te contactará para continuar con tu proyecto.",
+          // Con respaldo, se dice con honestidad por dónde llegó; el registro principal se completa solo.
+          text: viaBackup ? `${base} (La recibimos por nuestro canal de respaldo mientras nuestro sistema principal se recupera.)` : base,
         },
         ...(whatsapp || !state.callbackRequested ? [closingBlock(next, "Si quieres adelantar la conversación:")] : []),
       ],
@@ -584,17 +594,14 @@ export function leadSubmissionResult(state: ConversationState, result: { ok: boo
       state: next,
     };
   }
-  // Sin éxito falso: nunca "Solicitud recibida" si la base de datos no lo confirmó.
-  const byEmail = result.backup === "email";
+  // Sin éxito falso: ningún mecanismo confirmó el lead.
   return {
     blocks: [
       {
         type: "lead-status",
         ok: false,
-        title: byEmail ? "Tu solicitud llegó por un canal alternativo" : "No pudimos enviar tu solicitud",
-        text: byEmail
-          ? "Nuestro sistema principal tuvo una falla, pero tus datos llegaron al equipo por correo. Los guardé en este navegador y volveré a intentar registrarlos automáticamente. Si prefieres, continúa ahora por WhatsApp o llámanos."
-          : "Puedes intentarlo nuevamente o continuar por WhatsApp. Guardé tus datos en este navegador y volveré a intentar enviarlos automáticamente.",
+        title: "No pudimos enviar tu solicitud",
+        text: "Estamos teniendo una dificultad temporal para enviar tu solicitud. Tus datos siguen preparados para reintentar. Puedes intentarlo nuevamente o continuar por WhatsApp.",
       },
       { type: "contact-links", whatsappMessage: buildWhatsAppMessage(state) },
     ],
@@ -998,7 +1005,7 @@ function explainAgain(state: ConversationState): Reply {
   return {
     blocks: [
       text(
-        "Te explico en simple: tenemos tres planes web. **Básico** es para tener presencia profesional, **Esencial** para mostrar lo que vendes y captar clientes, y **Premium** para automatizar reservas y procesos. Jeipy AI se suma aparte si quieres un asistente. Cuéntame a qué se dedica tu negocio y te digo cuál te sirve.",
+        "Te explico en simple: tenemos tres planes web. **Básico** es presencia digital profesional, **Esencial** es una web comercial para captar clientes, y **Premium** es una solución comercial automatizada (seguimiento de oportunidades, integraciones, reservas y procesos). Jeipy AI se suma aparte si quieres un asistente. Cuéntame a qué se dedica tu negocio y te digo cuál te sirve.",
       ),
     ],
     quickReplies: CHIPS.start,
@@ -1080,9 +1087,9 @@ function answerIntent(intent: Intent, state: ConversationState): Reply | null {
           {
             type: "list",
             items: [
-              `**Básico** (desde ${getPlan("basico").price}): presencia profesional sencilla, sin IA.`,
-              `**Esencial** (desde ${getPlan("esencial").price}): web completa para captar clientes, con catálogo y formularios. Compatible con Jeipy AI Lite como complemento opcional.`,
-              `**Premium** (desde ${getPlan("premium").price}): solución personalizada con reservas, integraciones y flujos a medida. Compatible con Jeipy AI Pro, que se contrata aparte.`,
+              `**Básico** (desde ${getPlan("basico").price}): presencia digital profesional, sin IA.`,
+              `**Esencial** (desde ${getPlan("esencial").price}): web comercial orientada a captación, con catálogo, formularios, SEO básico y Analytics. Compatible con Jeipy AI Lite como complemento opcional.`,
+              `**Premium** (desde ${getPlan("premium").price}): solución digital comercial y automatizada: seguimiento de oportunidades, flujos, integraciones y funciones a medida. Compatible con Jeipy AI Pro, que se contrata aparte.`,
             ],
           },
           text("La diferencia está en lo que necesitas lograr. Si me cuentas un poco de tu negocio, te digo cuál tiene más sentido."),

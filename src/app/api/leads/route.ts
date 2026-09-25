@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import type { LeadSubmitResult } from "@/features/leads/types";
-import { isRateLimited } from "@/server/leads/rate-limit";
+import { LIMITS, isRateLimited } from "@/server/leads/rate-limit";
 import { processLead } from "@/server/leads/service";
 import { validateLead } from "@/server/leads/validate";
 
@@ -22,16 +22,25 @@ export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
   if (origin && new URL(origin).host !== request.headers.get("host")) return json({ ok: false, error: "invalid", requestId }, 403);
 
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
-  if (isRateLimited(`lead:${ip}`)) return json({ ok: false, error: "rate-limited", requestId }, 429);
-
   const raw = await request.text();
-  if (raw.length > 100_000) return json({ ok: false, error: "invalid", requestId }, 413);
+  // Margen amplio: el historial se recorta en el cliente y en el servidor; un lead real nunca debe rechazarse por tamaño.
+  if (raw.length > 1_000_000) {
+    console.warn(`[leads ${requestId}] Solicitud demasiado grande (${raw.length} bytes)`);
+    return json({ ok: false, error: "invalid", requestId }, 413);
+  }
   let body: unknown;
   try {
     body = JSON.parse(raw);
   } catch {
     return json({ ok: false, error: "invalid", requestId }, 400);
+  }
+
+  // Límite por IP contando leads distintos: reintentar el mismo lead nunca queda bloqueado.
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
+  const conversationId = typeof (body as Record<string, unknown>)?.conversationId === "string" ? String((body as Record<string, unknown>).conversationId) : undefined;
+  if (isRateLimited(`lead:${ip}`, { ...LIMITS.lead, id: conversationId })) {
+    console.warn(`[leads ${requestId}] Límite de solicitudes alcanzado para ${ip}`);
+    return json({ ok: false, error: "rate-limited", requestId }, 429);
   }
 
   // Campo trampa: los bots lo rellenan, las personas no lo ven. No se guarda nada.

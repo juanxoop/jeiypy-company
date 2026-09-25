@@ -26,12 +26,12 @@ function blockText(block: MessageBlock): string | null {
 export function toTranscript(messages: ChatMessage[]): TranscriptEntry[] {
   return messages
     .map((message): TranscriptEntry | null => {
-      if (message.role === "user") return { role: "user", text: message.text };
+      if (message.role === "user") return { role: "user", text: message.text.slice(0, 1_000) };
       const text = message.blocks.map(blockText).filter(Boolean).join("\n");
-      return text ? { role: "assistant", text } : null;
+      return text ? { role: "assistant", text: text.slice(0, 1_000) } : null;
     })
     .filter((entry): entry is TranscriptEntry => entry !== null)
-    .slice(-80);
+    .slice(-60);
 }
 
 type Payload = LeadDraft & { transcript?: TranscriptEntry[] };
@@ -48,6 +48,8 @@ async function post(payload: Payload): Promise<LeadSubmitResult> {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        // El servidor reintenta Supabase (~15 s máx.); el navegador nunca se queda esperando indefinidamente.
+        signal: AbortSignal.timeout(25_000),
       });
       const result = (await response.json().catch(() => null)) as LeadSubmitResult | null;
       // Éxito solo con la confirmación del servidor (id del lead guardado en la base de datos).
@@ -103,7 +105,13 @@ function writePending(pending: Pending | null) {
 
 export const hasPendingLead = () => readPending() !== null;
 
-/** Envía el lead. Si falla (salvo datos inválidos), lo deja guardado en el navegador para reintentar. */
+/** El lead quedó asegurado: en la base de datos, o en un canal de respaldo (correo o webhook). */
+export const isLeadSecured = (result: LeadSubmitResult) => result.ok || result.backup === "email" || result.backup === "webhook";
+
+/**
+ * Envía el lead. Si la base de datos no lo confirmó (aunque un respaldo sí), lo deja guardado en
+ * el navegador para completar el registro después, sin volver a enviar el respaldo.
+ */
 export async function submitLead(lead: LeadDraft, messages: ChatMessage[]): Promise<LeadSubmitResult> {
   const payload: Payload = { ...lead, transcript: toTranscript(messages) };
   const result = await post(payload);
@@ -111,7 +119,7 @@ export async function submitLead(lead: LeadDraft, messages: ChatMessage[]): Prom
   else if (result.error !== "invalid") {
     const previous = readPending();
     writePending({
-      payload: { ...payload, backupNotified: result.backup === "email" || previous?.payload.backupNotified },
+      payload: { ...payload, backupNotified: result.backup === "email" || result.backup === "webhook" || previous?.payload.backupNotified },
       savedAt: previous?.savedAt ?? Date.now(),
       attempts: (previous?.attempts ?? 0) + 1,
     });
@@ -136,8 +144,23 @@ export async function retryPendingLead(): Promise<LeadSubmitResult | null> {
     writePending({
       ...pending,
       attempts: pending.attempts + 1,
-      payload: { ...pending.payload, backupNotified: pending.payload.backupNotified || result.backup === "email" },
+      payload: { ...pending.payload, backupNotified: pending.payload.backupNotified || result.backup === "email" || result.backup === "webhook" },
     });
   }
   return result;
+}
+
+/**
+ * Última oportunidad al cerrar la pestaña: si hay un lead pendiente, se envía con sendBeacon
+ * (el navegador lo despacha aunque la página se cierre). Guardar es idempotente, así que no
+ * duplica; el pendiente se conserva hasta confirmar en la próxima visita.
+ */
+export function beaconPendingLead(): void {
+  const pending = readPending();
+  if (!pending || typeof navigator === "undefined" || !navigator.sendBeacon) return;
+  try {
+    navigator.sendBeacon("/api/leads", new Blob([JSON.stringify(pending.payload)], { type: "application/json" }));
+  } catch {
+    /* sin beacon: queda el reintento en la próxima visita */
+  }
 }

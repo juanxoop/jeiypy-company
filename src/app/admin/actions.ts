@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { LEAD_STATUSES, type LeadStatus } from "@/features/leads/types";
 import { adminConfig, isAdminConfigured, passwordMatches, requireAdmin } from "@/server/admin/auth";
 import { ADMIN_COOKIE, SESSION_HOURS, createSessionToken } from "@/server/admin/session";
-import { isRateLimited } from "@/server/leads/rate-limit";
+import { LIMITS, isRateLimited } from "@/server/leads/rate-limit";
 import { addLeadNote, updateLeadStatus } from "@/server/leads/store";
 
 export type FormState = { error?: string; ok?: boolean };
@@ -15,7 +15,7 @@ export async function login(_: FormState, formData: FormData): Promise<FormState
   if (!isAdminConfigured()) return { error: "El acceso a la bandeja aún no está configurado (ADMIN_PASSWORD y ADMIN_SESSION_SECRET)." };
   const h = await headers();
   const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
-  if (isRateLimited(`login:${ip}`)) return { error: "Demasiados intentos. Espera unos minutos e inténtalo de nuevo." };
+  if (isRateLimited(`login:${ip}`, LIMITS.login)) return { error: "Demasiados intentos. Espera unos minutos e inténtalo de nuevo." };
 
   const password = String(formData.get("password") ?? "");
   if (!passwordMatches(password)) {

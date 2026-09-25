@@ -3,12 +3,13 @@ import { needsLabels } from "@/features/leads/labels";
 import { buildNarrative, buildReport, classifyLead } from "@/features/leads/report";
 import type { LeadRecord, LeadSubmission } from "@/features/leads/types";
 import { reportPersistenceFailure } from "./alerts";
+import { isBackupWebhookConfigured, sendLeadToBackupWebhook } from "./backup";
 import { getLeadNotifier } from "./notify";
 import { isStoreConfigured, saveLead } from "./store";
 
 export type ProcessResult =
   | { ok: true; id: string; notified: boolean }
-  | { ok: false; reason: "not-configured" | "failed"; backup: "email" | "none" };
+  | { ok: false; reason: "not-configured" | "failed"; backup: "email" | "webhook" | "none" };
 
 export function buildLeadRecord(lead: LeadSubmission, meta: { userAgent?: string } = {}): LeadRecord {
   const status = classifyLead(lead);
@@ -31,8 +32,9 @@ export function buildLeadRecord(lead: LeadSubmission, meta: { userAgent?: string
  * 1. Se guarda en Supabase (con reintentos y tiempo límite) y, EN PARALELO, se avisa al equipo
  *    por correo (canal independiente, cuando está configurado).
  * 2. El éxito depende SOLO de la confirmación de Supabase.
- * 3. Si Supabase falla tras los reintentos, el correo ya enviado es el respaldo; se registra la
- *    falla y se alerta al equipo si se repite o si el lead quedó sin respaldo.
+ * 3. Si Supabase falla tras los reintentos, el respaldo es el correo ya enviado; si el correo
+ *    no confirmó, se envía el lead al webhook de respaldo (independiente de Resend).
+ * 4. Se registra la falla y se alerta al equipo si se repite o si el lead quedó sin respaldo.
  */
 export async function processLead(
   lead: LeadSubmission,
@@ -54,7 +56,15 @@ export async function processLead(
   if (saved.status === "fulfilled") return { ok: true, id: saved.value, notified };
 
   const reason = saved.reason instanceof Error ? saved.reason.message : String(saved.reason);
-  const backup = notified || lead.backupNotified ? "email" : "none";
+  let backup: "email" | "webhook" | "none" = notified || lead.backupNotified ? "email" : "none";
+  if (backup === "none" && isBackupWebhookConfigured()) {
+    try {
+      await sendLeadToBackupWebhook(record, meta.requestId);
+      backup = "webhook";
+    } catch (error) {
+      log("El webhook de respaldo también falló:", error);
+    }
+  }
   log(`No se pudo guardar el lead en Supabase tras los reintentos (respaldo: ${backup}).`, saved.reason);
   await reportPersistenceFailure({
     requestId: meta.requestId,

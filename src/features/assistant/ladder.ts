@@ -40,7 +40,7 @@ export function aiSetupCost(id: AiTierId): number {
   return priceValue(getAiTier(id).setup.price);
 }
 
-/** "web desde $1.000.000 + Jeipy AI Lite desde $200.000". */
+/** "desde $2.399.000 + Jeipy AI Lite desde $200.000" (precios leídos de src/data). */
 export function tierPriceText(tier: Tier): string {
   const web = `desde ${getPlan(tierPlan(tier)).price}`;
   return tier === "esencial-ai" ? `${web} + Jeipy AI Lite desde ${getAiTier("lite").setup.price}` : web;
@@ -132,7 +132,7 @@ const TIER_BASE: Record<Tier, string> = {
   basico: "presencia profesional con WhatsApp, ubicación y contacto",
   esencial: "una web completa con catálogo, formularios, SEO básico y WhatsApp",
   "esencial-ai": "una web completa con catálogo, formularios y Jeipy AI Lite respondiendo dudas",
-  premium: "una solución personalizada con reservas, flujos e integraciones",
+  premium: "una solución comercial automatizada, con seguimiento de oportunidades, flujos e integraciones",
 };
 
 export type Coverage = {
@@ -183,7 +183,7 @@ export function coverage(profile: Profile, tier: Tier): Coverage {
 const TIER_ADDS: Record<Exclude<Tier, "basico">, string> = {
   esencial: "catálogo, formularios, SEO básico, Analytics y una estructura comercial más completa",
   "esencial-ai": "Jeipy AI Lite, que responde dudas, orienta y capta datos",
-  premium: "reservas automáticas, flujos a medida, integraciones, soporte y actualizaciones",
+  premium: "automatización, captación y seguimiento de oportunidades, flujos comerciales, integraciones y funciones a medida",
 };
 
 export function tierAdds(profile: Profile, lower: Tier, upper: Tier): string[] {

@@ -59,7 +59,7 @@ del destello metálico. La imagen Open Graph también usa el isotipo.
 3. Aparece en la bandeja privada **`/admin/leads`**.
 4. Si el correo está configurado, se envía un aviso por **Resend**.
 
-El asistente solo muestra "Solicitud recibida" cuando Supabase confirma que guardó el lead. Si el guardado falla, lo dice y ofrece reintentar, y el error queda en los registros del servidor con una referencia (`requestId`). La falta de correo nunca impide guardar el lead.
+El asistente solo muestra "Solicitud recibida" cuando un mecanismo persistente confirmó el lead: Supabase, o un respaldo (correo por Resend o webhook) que respondió OK. Si todo falla, lo dice, conserva los datos para reintentar y ofrece WhatsApp y llamada, y el error queda en los registros del servidor con una referencia (`requestId`). La falta de correo nunca impide guardar el lead.
 
 **Configuración (una vez):**
 1. En Supabase: *SQL Editor → New query*, pega `supabase/leads.sql` y ejecútalo. Crea o actualiza las tablas `leads` y `lead_notes` con RLS activo y sin políticas públicas.
@@ -76,23 +76,24 @@ El asistente solo muestra "Solicitud recibida" cuando Supabase confirma que guar
 | `LEADS_EMAIL_FROM` | No | Remitente verificado en Resend |
 | `JEIPY_ALERTS_EMAIL` | No | Destino de alertas de fallas (por defecto, `JEIPY_LEADS_EMAIL`) |
 | `LEADS_ALERT_WEBHOOK_URL` | No | Webhook de Slack/Discord para las mismas alertas |
+| `LEADS_BACKUP_WEBHOOK_URL` | No | Webhook que recibe el lead completo si Supabase falla y el correo no se confirmó (por defecto, `LEADS_ALERT_WEBHOOK_URL`) |
 | `HEALTHCHECK_TOKEN` | No | Token para que un monitor consulte `/api/health` |
 | `NEXT_PUBLIC_CONTACT_PHONE` | No | Teléfono para "Llamar ahora" (si falta, el de WhatsApp) |
 
-**Estados:** Nuevo, Contactado, Interesado, Cotización, Solicita llamada, Cerrado - Ganado, Cerrado - No interesado y Cerrado - Sin respuesta.
+**Estados:** Nuevo, Contactado, Interesado, Cotización, Solicita llamada, Cerrado — Ganado, Cerrado — No interesado y Cerrado — Sin respuesta.
 - Cerrar solo cambia el estado; nunca borra. El servidor no tiene permiso de `DELETE` sobre los leads.
 - Cada cambio de estado queda en el historial (`lead_notes`, `kind = 'status'`) junto con las notas del equipo.
 
 **Resiliencia:**
-- Supabase se reintenta 3 veces, con espera creciente y tiempo límite de 4 s por intento. El correo al equipo sale en paralelo y sirve de respaldo.
-- Si Supabase no responde, el cliente nunca ve "Solicitud recibida":
-  - si el correo llegó, el mensaje dice que la solicitud llegó por un canal alternativo;
-  - si no, que no pudimos enviarla.
-
-  En ambos casos:
+- Supabase se reintenta 3 veces, con espera creciente (0,4 s y 1,2 s) y tiempo límite de 4 s por intento. El correo al equipo sale en paralelo y sirve de respaldo.
+- Si Supabase falla y el correo no se confirmó, el lead se envía al webhook de respaldo (`LEADS_BACKUP_WEBHOOK_URL`).
+- "Solicitud recibida" solo aparece si Supabase o un respaldo (correo o webhook) confirmó el lead. Con respaldo, el mensaje aclara que llegó por el canal de respaldo.
+- Si nada lo confirmó, el cliente ve un mensaje de dificultad temporal y:
   - sus datos quedan 72 h en el navegador;
-  - se reintentan solos (al volver la conexión y cada 60 s);
-  - se ofrece WhatsApp o llamada directa.
+  - se reintentan solos (al volver la conexión, cada 60 s y con `sendBeacon` al cerrar la pestaña);
+  - puede reintentar con un botón o seguir por WhatsApp o llamada.
+- Límite anti-abuso: 30 leads distintos por IP cada 10 min. Reintentar el mismo lead (misma conversación) nunca consume cupo ni queda bloqueado.
+- `/admin/sistema` muestra la salud en vivo, qué respaldo está realmente operativo y qué variables faltan, con botones para enviar un correo o webhook de prueba real.
 - Las fallas repetidas (o un lead sin respaldo) generan una alerta por correo y/o webhook.
 - `GET /api/health` (sesión del equipo o `Authorization: Bearer $HEALTHCHECK_TOKEN`) comprueba backend, lectura y escritura no destructiva en Supabase. Responde 503 si algo falla, para que un monitor avise.
 - Si el asistente no carga o falla, un formulario mínimo de contingencia permite dejar datos, pedir llamada o abrir WhatsApp.
@@ -100,9 +101,9 @@ El asistente solo muestra "Solicitud recibida" cuando Supabase confirma que guar
 **Bandeja `/admin/leads`:**
 - Se entra con la contraseña del equipo. La sesión es una cookie httpOnly firmada que dura 12 horas.
 - `src/proxy.ts` bloquea `/admin` sin sesión, y cada página y acción vuelve a verificarla antes de tocar datos.
-- Filtros: Activos (todo lo no cerrado, vista por defecto), Solicita llamada, Cotizaciones, Cerrados y Todos. El listado se relee de la base de datos cada 20 s y al volver a la pestaña.
+- Filtros: Activos (todo lo no cerrado, vista por defecto), Solicita llamada, Cotización, Cerrados y Todos. El listado se relee de la base de datos cada 20 s y al volver a la pestaña.
 - Clic en una fila: ficha completa en un panel lateral, con enlace a la vista dedicada `/admin/leads/[id]`.
-- Acciones de la ficha: llamar, abrir WhatsApp, cambiar estado, notas, marcar como contactado y cerrar como ganado, no interesado o sin respuesta. También muestra el historial de actividad.
+- Acciones de la ficha: llamar, abrir WhatsApp, cambiar estado, notas, marcar como contactado y cerrar como ganado, no interesado o sin respuesta. La ficha separa las notas internas del historial de estados y muestra la presencia digital canal por canal (WhatsApp, Instagram, Facebook, TikTok, web actual y su estado).
 - Si la base de datos no está lista, la bandeja explica qué falta.
 
 **Seguridad:** el navegador nunca recibe claves. Los visitantes no pueden leer ni escribir las tablas: RLS está activo sin políticas y se revocaron los permisos de `anon` y `authenticated`. El formulario público solo crea leads validados en el servidor.

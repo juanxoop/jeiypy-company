@@ -1,5 +1,6 @@
 import { CHANNEL_LABEL, GOAL_LABEL, WEBSITE_LABEL } from "@/features/leads/labels";
 import { CONTACT_CHANNEL_LABEL, recommendationLabel } from "@/features/leads/report";
+import type { DigitalChannel } from "@/features/assistant/types";
 import { LEAD_STATUSES, isClosedStatus, type LeadNote, type LeadRow, type LeadStatus } from "@/features/leads/types";
 import { getAiTier } from "@/data/jeipyAi";
 import { plans } from "@/data/plans";
@@ -46,38 +47,50 @@ function StatusButton({ lead, status, label, tone = "default" }: { lead: LeadRow
   );
 }
 
-function Activity({ notes }: { notes: LeadNote[] }) {
-  if (!notes.length) return <p className="text-sm text-mist">Sin actividad todavía.</p>;
+function Meta({ item }: { item: LeadNote }) {
+  return (
+    <p className="text-xs text-mist">
+      {item.author ?? "Equipo"} · {formatDate(item.createdAt)}
+    </p>
+  );
+}
+
+/** Notas internas del equipo (más recientes primero). */
+function NotesList({ notes }: { notes: LeadNote[] }) {
+  if (!notes.length) return <p className="text-sm text-mist">Sin notas todavía.</p>;
+  return (
+    <ol className="space-y-3">
+      {notes.map((item) => (
+        <li key={item.id} className="rounded-xl border border-line bg-white/[0.02] p-3">
+          <p className="whitespace-pre-wrap text-sm text-snow/90">{item.body}</p>
+          <Meta item={item} />
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** Historial de estados, registrado por la base de datos en cada cambio. */
+function StatusHistory({ items }: { items: LeadNote[] }) {
+  if (!items.length) return <p className="text-sm text-mist">Sin cambios de estado registrados.</p>;
   return (
     <ol className="space-y-2.5">
-      {notes.map((item) => (
+      {items.map((item) => (
         <li key={item.id} className="flex gap-3">
-          <span
-            aria-hidden
-            className={`mt-1.5 size-2 shrink-0 rounded-full ${item.kind === "status" ? "bg-glow" : "bg-[#ffb547]"}`}
-          />
+          <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-glow" />
           <div className="min-w-0">
-            {item.kind === "status" ? (
-              <p className="text-sm text-snow/90">
-                {item.fromStatus ? (
-                  <>
-                    Estado: {statusLabel(item.fromStatus)} → <strong className="font-medium text-snow">{item.toStatus ? statusLabel(item.toStatus) : "—"}</strong>
-                  </>
-                ) : (
-                  <>
-                    {item.body} · <strong className="font-medium text-snow">{item.toStatus ? statusLabel(item.toStatus) : ""}</strong>
-                  </>
-                )}
-              </p>
-            ) : (
-              <p className="whitespace-pre-wrap text-sm text-snow/90">
-                <span className="mr-1 text-[#ffc97a]">Nota:</span>
-                {item.body}
-              </p>
-            )}
-            <p className="text-xs text-mist">
-              {item.author ?? "Equipo"} · {formatDate(item.createdAt)}
+            <p className="text-sm text-snow/90">
+              {item.fromStatus ? (
+                <>
+                  {statusLabel(item.fromStatus)} → <strong className="font-medium text-snow">{item.toStatus ? statusLabel(item.toStatus) : "—"}</strong>
+                </>
+              ) : (
+                <>
+                  {item.body} · <strong className="font-medium text-snow">{item.toStatus ? statusLabel(item.toStatus) : ""}</strong>
+                </>
+              )}
             </p>
+            <Meta item={item} />
           </div>
         </li>
       ))}
@@ -85,11 +98,21 @@ function Activity({ notes }: { notes: LeadNote[] }) {
   );
 }
 
+const PRESENCE_CHANNELS = ["whatsapp", "instagram", "facebook", "tiktok"] as const satisfies readonly DigitalChannel[];
+
 /** Ficha completa del lead, usada en el panel lateral de la bandeja y en su página propia. */
 export function LeadDetail({ lead, notes }: { lead: LeadRow; notes: LeadNote[] }) {
   const closed = isClosedStatus(lead.status);
   const planName = lead.recommendedPlan ? plans.find((p) => p.id === lead.recommendedPlan)?.name : undefined;
-  const channels = lead.channels.filter((c) => c !== "none").map((c) => CHANNEL_LABEL[c]);
+  // Presencia actual canal por canal. Si el cliente no habló de su presencia, se muestra "—" en vez de "No".
+  const presenceKnown = lead.channels.length > 0 || Boolean(lead.websiteStatus);
+  const has = (c: DigitalChannel) => (presenceKnown ? (lead.channels.includes(c) ? "Sí" : "No") : undefined);
+  const hasWebsite = lead.channels.includes("website") || (lead.websiteStatus !== undefined && lead.websiteStatus !== "none");
+  const otherChannels = lead.channels
+    .filter((c) => !["whatsapp", "instagram", "facebook", "tiktok", "website", "none"].includes(c))
+    .map((c) => CHANNEL_LABEL[c]);
+  const statusItems = notes.filter((n) => n.kind === "status");
+  const teamNotes = notes.filter((n) => n.kind === "note");
 
   return (
     <div className="space-y-4">
@@ -173,8 +196,17 @@ export function LeadDetail({ lead, notes }: { lead: LeadRow; notes: LeadNote[] }
           <Field label="Negocio">{lead.businessName}</Field>
           <Field label="Tipo de negocio">{lead.businessType}</Field>
           <Field label="Descripción">{lead.businessDescription}</Field>
-          <Field label="Canales actuales">{channels.join(", ") || (lead.channels.includes("none") ? "Ninguno" : undefined)}</Field>
-          <Field label="Página web">{lead.websiteStatus ? WEBSITE_LABEL[lead.websiteStatus] : undefined}</Field>
+        </dl>
+        <h4 className="mt-4 text-xs font-medium text-snow/80">Presencia digital actual</h4>
+        <dl className="mt-1 divide-y divide-line">
+          {PRESENCE_CHANNELS.map((c) => (
+            <Field key={c} label={CHANNEL_LABEL[c]}>
+              {has(c)}
+            </Field>
+          ))}
+          <Field label="Página web actual">{presenceKnown ? (hasWebsite ? "Sí" : "No") : undefined}</Field>
+          <Field label="Estado de la web">{lead.websiteStatus ? WEBSITE_LABEL[lead.websiteStatus] : undefined}</Field>
+          {otherChannels.length > 0 && <Field label="Otros canales">{otherChannels.join(", ")}</Field>}
         </dl>
       </Panel>
 
@@ -190,11 +222,15 @@ export function LeadDetail({ lead, notes }: { lead: LeadRow; notes: LeadNote[] }
         </dl>
       </Panel>
 
-      <Panel title="Notas internas e historial">
+      <Panel title={`Notas internas (${teamNotes.length})`}>
         <NoteForm leadId={lead.id} />
-        <div className="mt-5">
-          <Activity notes={notes} />
+        <div className="mt-4">
+          <NotesList notes={teamNotes} />
         </div>
+      </Panel>
+
+      <Panel title="Historial de estados">
+        <StatusHistory items={statusItems} />
       </Panel>
 
       {lead.transcript?.length ? (

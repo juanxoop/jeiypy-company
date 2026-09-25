@@ -37,7 +37,7 @@ export type InboxFilter = "activos" | "llamadas" | "cotizaciones" | "cerrados" |
 export const INBOX_FILTERS: { id: InboxFilter; label: string; match: (status: LeadStatus) => boolean }[] = [
   { id: "activos", label: "Activos", match: (s) => !isClosedStatus(s) },
   { id: "llamadas", label: "Solicita llamada", match: (s) => s === "solicita-llamada" },
-  { id: "cotizaciones", label: "Cotizaciones", match: (s) => s === "cotizacion" },
+  { id: "cotizaciones", label: "Cotización", match: (s) => s === "cotizacion" },
   { id: "cerrados", label: "Cerrados", match: (s) => isClosedStatus(s) },
   { id: "todos", label: "Todos", match: () => true },
 ];

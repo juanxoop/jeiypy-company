@@ -162,8 +162,8 @@ Extras sutiles: los iconos de servicio animan una sola pieza al hover, la luz am
 
 | | Básico | Esencial | Premium |
 | --- | --- | --- | --- |
-| Precio | Desde $600.000 COP | Desde $1.000.000 COP | Desde $1.500.000 COP |
-| Resumen | Página profesional y clara para empezar con una base sólida. | Web más completa, con herramientas para mostrar lo que ofreces y captar clientes. | Solución personalizada y automatizada, preparada para acompañar tu crecimiento. |
+| Precio | Desde $999.900 COP | Desde $2.399.000 COP | Desde $4.699.000 COP |
+| Posicionamiento | Presencia digital profesional. | Web comercial orientada a captación (Jeipy AI Lite como complemento opcional). | Solución digital comercial y automatizada (no "una página más cara"). |
 | Incluye | Página informativa, responsive, info del negocio, WhatsApp, ubicación y contacto, estructura visual profesional, optimización básica de rendimiento. | Sitio más completo, varias secciones, catálogo, formularios de contacto o cotización, SEO básico y Analytics, WhatsApp, velocidad y experiencia optimizadas, responsive. | Diseño avanzado, desarrollo personalizado, catálogo avanzado, formularios y flujos a medida, integraciones, SEO básico y Analytics, optimización avanzada, soporte y acompañamiento, actualizaciones, responsive. |
 | Jeipy AI | Fila discreta: "Jeipy AI · No incluido". | Bajo `OPCIONAL`: recuadro punteado secundario con "+". | Sección propia destacada (ver punto 16). |
 | Destaque | — | Borde en degradado azul, nombre en azul, badge discreto "Más popular" con punto. | La columna más ancha y el bloque de IA más tecnológico. |

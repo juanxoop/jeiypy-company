@@ -204,13 +204,14 @@ El nivel aceptado queda como tope (`planCap`) y las recomendaciones siguientes l
 
 **Envío real:** el motor emite el efecto `submit-lead` y `useAssistant` lo envía a `POST /api/leads` junto con el historial mientras muestra "Enviando tu solicitud…". El servidor lo guarda en Supabase y solo responde éxito con la fila confirmada. Después avisa por correo (Resend, opcional). Si falla: "No pudimos enviar tu solicitud. Puedes intentarlo nuevamente o continuar por WhatsApp", y el error queda registrado con una referencia. El lead aparece en la bandeja privada `/admin/leads`. No promete tiempos de respuesta.
 
-**Estado interno** (no se muestra al cliente): Nuevo, Contactado, Interesado, Cotización, Solicita llamada, Cerrado - Ganado, Cerrado - No interesado o Cerrado - Sin respuesta. El asistente asigna el inicial y el equipo lo gestiona desde la bandeja. Cerrar nunca borra.
+**Estado interno** (no se muestra al cliente): Nuevo, Contactado, Interesado, Cotización, Solicita llamada, Cerrado — Ganado, Cerrado — No interesado o Cerrado — Sin respuesta. El asistente asigna el inicial y el equipo lo gestiona desde la bandeja. Cerrar nunca borra.
 
 **Contingencia:**
-- **Supabase falla tras los reintentos:** el mensaje es "Tu solicitud llegó por un canal alternativo" si el correo de respaldo salió, o "No pudimos enviar tu solicitud" si no. En ambos casos:
-  - aparecen WhatsApp y "Llamar ahora";
-  - los datos quedan en el navegador y se reintentan solos;
-  - al confirmarse, el chat muestra "Solicitud recibida".
+- **Supabase falla tras los reintentos, pero un respaldo confirmó (correo por Resend o webhook):** "Solicitud recibida", aclarando que llegó por el canal de respaldo.
+- **Nada confirmó el lead:** nunca se dice "Solicitud recibida". El mensaje es "Estamos teniendo una dificultad temporal para enviar tu solicitud. Tus datos siguen preparados para reintentar…", con:
+  - WhatsApp y "Llamar ahora";
+  - sugerencia "Reintentar envío";
+  - los datos guardados en el navegador (72 h), reintentados solos cada 60 s, al volver la conexión y al cerrar la pestaña.
 - **El asistente falla o no carga:** aparece un formulario mínimo (nombre, celular, negocio, necesidad, llamada y autorización) que usa el mismo envío real.
 
 ## 8. Próxima fase: integración real
