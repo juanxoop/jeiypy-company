@@ -6,7 +6,7 @@ import { safeSlice } from "@/lib/text";
 import { reportPersistenceFailure } from "./alerts";
 import { isBackupWebhookConfigured, sendLeadToBackupWebhook } from "./backup";
 import { getLeadNotifier } from "./notify";
-import { isStoreConfigured, saveLead, storeErrorInfo } from "./store";
+import { fromRecord, isStoreConfigured, saveLead, storeErrorInfo, storeTarget } from "./store";
 
 export type ProcessResult =
   | { ok: true; id: string; notified: boolean }
@@ -25,6 +25,27 @@ export function buildLeadRecord(lead: LeadSubmission, meta: { userAgent?: string
     report: buildReport(lead, status),
     source: "jeipy-ai",
     userAgent: meta.userAgent ? safeSlice(meta.userAgent, 300) : undefined,
+  };
+}
+
+/**
+ * Forma del payload enviado a Supabase, para los registros: columnas, valores de control
+ * (status, intent, plan) y longitudes de texto. Nunca nombre, teléfono, correo ni textos.
+ */
+function payloadShape(record: LeadRecord) {
+  const row = fromRecord(record);
+  const lengths: Record<string, number> = {};
+  for (const [key, value] of Object.entries(row)) if (typeof value === "string") lengths[key] = value.length;
+  return {
+    columns: Object.keys(row),
+    nullColumns: Object.keys(row).filter((k) => row[k] === null),
+    status: row.status,
+    intent: row.intent,
+    recommended_plan: row.recommended_plan,
+    website_status: row.website_status,
+    transcriptEntries: Array.isArray(row.transcript) ? row.transcript.length : 0,
+    textLengths: lengths,
+    bytes: JSON.stringify(row).length,
   };
 }
 
@@ -80,10 +101,12 @@ export async function processLead(
       requestId: meta.requestId,
       ...failure,
       attempts,
+      retried: attempts > 1,
       durationMs: Date.now() - started,
       backup,
       conversationId: lead.conversationId,
-      status: record.status,
+      target: storeTarget(),
+      payload: payloadShape(record),
     }),
   );
   await reportPersistenceFailure({

@@ -5,17 +5,11 @@
 import type { UnknownTopic } from "./knowledge";
 import type { AiLevel, AiTierId, Budget, DigitalChannel, Feature, FeatureMap, Goal, PlanId, Profile, WebsiteStatus } from "./types";
 import { safeSlice } from "@/lib/text";
+import { normalize } from "./normalize";
+import { readPolarity } from "./polarity";
 
-export function normalize(text: string): string {
-  return ` ${text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/(?<!\d)[.,]|[.,](?!\d)/g, " ")
-    .replace(/[¿?¡!;:()"'$]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()} `;
-}
+export { normalize };
+
 
 const has = (text: string, ...needles: string[]) => needles.some((n) => text.includes(n));
 
@@ -440,7 +434,7 @@ const CHANNEL_WORDS: [Exclude<DigitalChannel, "website" | "none">, string[]][] =
 ];
 const WEBSITE_WORDS = [" pagina web", " pagina", " sitio web", " sitio", " web ", " website", " dominio", " landing"];
 const OUTDATED = [" vieja", " viejo", " desactualizad", " antigua", " anticuad", " obsolet", " fea", " feo", " de hace anos", " pasada de moda", " vencid"];
-const NEEDS_WORK = [" mejorar", " mejorarla", " no funciona", " lenta", " no me gusta", " no vende", " no convierte", " rediseñ", " redisen", " arreglar", " no sirve", " mala", " renovar", " actualizar", " incompleta", " no genera"];
+const NEEDS_WORK = [" mejorar", " mejorarla", " no funciona", " lenta", " no me gusta", " no vende", " no convierte", " rediseñ", " redisen", " arreglar", " no sirve", " mala", " renovar", " actualizar", " incompleta", " no genera", " horrible", " horrorosa", " espantosa", " terrible", " muy basica", " no me convence", " regular", " maluca", " feita"];
 
 /**
  * Suma lo que el visitante contó de su presencia digital al perfil. Lo que dice de su página
@@ -450,6 +444,7 @@ const NEEDS_WORK = [" mejorar", " mejorarla", " no funciona", " lenta", " no me 
 export function applyPresence(profile: Profile, raw: string, reading: PresenceReading, { direct = false } = {}): void {
   if (!reading.mentioned) return;
   const merged = new Set([...(profile.channels ?? []), ...reading.channels]);
+  for (const channel of reading.absent ?? []) merged.delete(channel);
   if ([...merged].some((c) => c !== "none")) merged.delete("none");
   profile.channels = [...merged];
   const explicitSite = direct || WEBSITE_WORDS.some((w) => normalize(raw).includes(w)) || reading.channels.includes("none");
@@ -458,6 +453,8 @@ export function applyPresence(profile: Profile, raw: string, reading: PresenceRe
 
 export type PresenceReading = {
   channels: DigitalChannel[];
+  /** Canales que el visitante dice NO tener ("no tengo Instagram"). */
+  absent?: DigitalChannel[];
   websiteStatus?: WebsiteStatus;
   /** El mensaje habla de su presencia digital (redes, página o "no tengo nada"). */
   mentioned: boolean;
@@ -471,12 +468,17 @@ export function extractPresence(raw: string, { direct = false } = {}): PresenceR
   // "página de Facebook" es Facebook, no una página web.
   const t = normalize(raw).replace(/ (pagina|perfil|cuenta) (de|en) (facebook|instagram|tiktok|google)/g, " $3");
   const channels = new Set<DigitalChannel>();
+  const absent = new Set<DigitalChannel>();
   for (const [channel, words] of CHANNEL_WORDS) {
     for (const word of words) {
       const i = t.indexOf(word);
-      if (i !== -1 && !negatedAt(t, i)) channels.add(channel);
+      if (i === -1) continue;
+      // "No tengo Instagram" también es un dato: corrige lo que se creía.
+      if (negatedAt(t, i)) absent.add(channel);
+      else channels.add(channel);
     }
   }
+  for (const channel of channels) absent.delete(channel);
   // "redes" solo cuenta como "other" si no nombró ninguna red concreta.
   if (channels.has("other") && [...channels].some((c) => c !== "other" && c !== "ecommerce") && !has(t, " linkedin", " youtube", " pinterest", " twitter", " telegram")) {
     channels.delete("other");
@@ -501,14 +503,15 @@ export function extractPresence(raw: string, { direct = false } = {}): PresenceR
     websiteStatus ??= "none";
   }
   if (direct && !channels.size && !websiteStatus) {
-    if (/^ (si|claro|ya|sip|correcto)\b/.test(t)) {
+    const { polarity } = readPolarity(raw);
+    if (/^ ya /.test(t) || polarity === "positive") {
       channels.add("website");
       websiteStatus = "existing";
-    } else if (/^ (no|nop|todavia no|aun no)\b/.test(t)) websiteStatus = "none";
+    } else if (polarity === "negative") websiteStatus = "none";
   }
   // Nombró sus canales sin mencionar una página: hoy no tiene web propia.
   if (!websiteStatus && [...channels].some((c) => c !== "none")) websiteStatus = "none";
-  return { channels: [...channels], websiteStatus, mentioned: channels.size > 0 || websiteStatus !== undefined };
+  return { channels: [...channels], absent: [...absent], websiteStatus, mentioned: channels.size > 0 || absent.size > 0 || websiteStatus !== undefined };
 }
 
 
@@ -542,7 +545,8 @@ const FEATURE_KEYWORDS: Record<Feature, string[]> = {
  */
 function negatedAt(t: string, index: number): boolean {
   const before = t.slice(Math.max(0, index - 40), index + 1);
-  const clause = before.split(/ pero | sino | aunque | y | mas bien | ademas |, /).pop() ?? "";
+  // Un nuevo "quiero/necesito…" que no va negado abre otra idea: "no quiero catálogo, quiero reservas".
+  const clause = before.split(/ pero | sino | aunque | y | mas bien | ademas |, |(?<! no) (?=(?:quiero|necesito|me gustaria|prefiero|mejor|si tengo|tengo) )/).pop() ?? "";
   return NEGATION.test(` ${clause.trim()} `);
 }
 
@@ -582,11 +586,16 @@ const EXPLICIT_WANT = [" quiero", " necesito", " me gustaria", " tambien", " aho
 
 export type YesNo = "yes" | "no" | "later" | undefined;
 
+/**
+ * Sí / no / más adelante, leído por señales (ver `polarity.ts`), no por frases exactas:
+ * "me encanta", "de una", "eso sí me serviría" → sí; "la verdad no", "nah, eso no" → no;
+ * "no sé todavía", "puede ser", "sí, aunque primero algo sencillo" → más adelante.
+ */
 export function parseYesNo(raw: string): YesNo {
-  const t = normalize(raw);
-  if (/^ (mas adelante|despues|luego|quizas|tal vez|puede ser|no se|no estoy seguro)\b/.test(t)) return "later";
-  if (/^ (si|claro|obvio|por supuesto|me gustaria|me interesa|dale|ok|vale|sip|seria ideal|lo necesito|quiero)\b/.test(t)) return "yes";
-  if (/^ (no|nop|nel|para nada|no lo necesito|no por ahora|por ahora no|ninguno|ninguna)\b/.test(t)) return "no";
+  const { polarity, later } = readPolarity(raw);
+  if (polarity === "positive") return later ? "later" : "yes";
+  if (polarity === "negative") return "no";
+  if (polarity === "uncertain") return "later";
   return undefined;
 }
 
@@ -700,4 +709,26 @@ export function extractChannel(raw: string): "whatsapp" | "llamada" | "correo" |
 
 export function declines(raw: string): boolean {
   return /^ (no|prefiero no|mejor no|no gracias|ahora no|despues|luego|omitir|saltar|no tengo|aun no)\b/.test(normalize(raw));
+}
+
+/* ---------------------------------------------------------------
+   Correcciones del visitante
+   --------------------------------------------------------------- */
+
+/** "Perdón, sí tengo Instagram", "en realidad…", "me equivoqué": corrige algo que ya dijo. */
+export function hasCorrectionMarker(raw: string): boolean {
+  return has(
+    normalize(raw),
+    " perdon", " perdona", " disculpa", " me equivoque", " en realidad", " realmente", " mejor dicho", " corrijo", " correccion",
+    " de hecho", " rectifico", " quise decir", " ah no ", " error mio", " se me olvido", " olvide decir", " olvide decirte", " me falto",
+  );
+}
+
+/** "Mi presupuesto es menor", "en realidad tengo menos": cambia el presupuesto sin decir la cifra. */
+export function budgetCorrection(raw: string): "lower" | "higher" | undefined {
+  const t = normalize(raw);
+  if (!has(t, " presupuesto", " plata", " dinero", " invertir", " inversion")) return undefined;
+  if (has(t, " menor", " mas bajo", " menos", " mas poco", " no es tanto", " no tengo tanto", " mas corto", " mas ajustado", " apretado")) return "lower";
+  if (has(t, " mayor", " mas alto", " mas plata", " mas dinero", " puedo invertir mas", " tengo mas")) return "higher";
+  return undefined;
 }

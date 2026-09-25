@@ -11,7 +11,8 @@ export const leadsConfig = {
   supabase: {
     // Acepta la URL del proyecto con o sin "/" final o "/rest/v1": el cliente añade la ruta de la API.
     url: env("SUPABASE_URL")?.replace(/\/+$/, "").replace(/\/rest\/v1$/, ""),
-    serviceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
+    // Una clave nunca lleva espacios: un salto de línea pegado por error volvería inválido el encabezado.
+    serviceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY")?.replace(/\s+/g, ""),
   },
   /** Destinatarios de la notificación. Admite varios separados por coma. */
   recipients: (env("JEIPY_LEADS_EMAIL") ?? "")

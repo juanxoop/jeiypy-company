@@ -15,8 +15,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
  * Error de Supabase en forma segura para registros y alertas: código HTTP, código de error
  * (PostgREST "PGRST…" o Postgres "23514"…), mensaje saneado y columna/constraint afectados.
- * Nunca incluye la clave ni los datos del lead: Postgres pone la fila completa en `details`
- * ("Failing row contains (…)") y ese campo se descarta.
+ * Nunca incluye la clave ni los datos del lead: de `details` se elimina la fila completa que
+ * Postgres adjunta ("Failing row contains (…)") y los valores entre comillas.
  */
 export type StoreErrorInfo = {
   httpStatus?: number;
@@ -24,6 +24,10 @@ export type StoreErrorInfo = {
   code?: string;
   message: string;
   hint?: string;
+  /** `details` de PostgREST, saneado (sin filas ni valores del visitante). */
+  details?: string;
+  /** Identificador de la petición en Supabase/Cloudflare, útil para el soporte de Supabase. */
+  supabaseRequestId?: string;
   column?: string;
   constraint?: string;
   /** Qué significa y qué revisar, en palabras simples. */
@@ -35,12 +39,15 @@ function sanitize(value: unknown, max = 240): string | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined;
   return value
     .replace(/Failing row contains[\s\S]*/i, "Failing row contains (…)")
+    .replace(/\(([^()]*)\)=\(([^()]*)\)/g, "($1)=(…)")
     .replace(/(["'])([^"']*)\1/g, (m, q: string, inner: string) => (/^[\w.-]{1,63}$/.test(inner) ? m : `${q}…${q}`))
     .slice(0, max);
 }
 
 function diagnose(info: Omit<StoreErrorInfo, "diagnosis">): string {
   const { code, httpStatus, column, constraint } = info;
+  if (code === "CONFIG")
+    return "La petición a Supabase no se pudo construir: SUPABASE_SERVICE_ROLE_KEY o SUPABASE_URL tienen caracteres inválidos (saltos de línea, espacios o comillas). Vuelve a pegar el valor en Vercel.";
   if (code === "TIMEOUT") return "Supabase no respondió a tiempo. Revisa el estado del proyecto (¿pausado por inactividad?) y la región.";
   if (code === "NETWORK") return "No se pudo conectar con Supabase (DNS/red). Revisa SUPABASE_URL y que el proyecto esté activo.";
   if (code === "NO_ROW") return "Supabase respondió sin devolver la fila guardada.";
@@ -60,7 +67,7 @@ function diagnose(info: Omit<StoreErrorInfo, "diagnosis">): string {
 }
 
 function errorInfo(fields: Omit<StoreErrorInfo, "diagnosis" | "column" | "constraint">): StoreErrorInfo {
-  const text = `${fields.message} ${fields.hint ?? ""}`;
+  const text = `${fields.message} ${fields.hint ?? ""} ${fields.details ?? ""}`;
   const column = /column "([\w.]+)"/.exec(text)?.[1] ?? /'([\w.]+)' column/.exec(text)?.[1];
   const constraint = /constraint "([\w.]+)"/.exec(text)?.[1];
   const base = { ...fields, column, constraint };
@@ -81,10 +88,16 @@ export class LeadStoreError extends Error {
   get status(): number | undefined {
     return this.info.httpStatus;
   }
-  /** Fallas pasajeras que vale la pena reintentar (red, tiempo agotado, 5xx, 408, 429). */
+  /**
+   * Solo se reintenta lo pasajero: tiempo agotado, red, 5xx, 408 y 429. Un 4xx (schema,
+   * constraint, campo inválido, autorización) o un error de configuración fallaría igual:
+   * se diagnostica de inmediato en vez de repetirlo.
+   */
   get transient(): boolean {
+    const { code } = this.info;
+    if (code === "TIMEOUT" || code === "NETWORK") return true;
     const status = this.status;
-    return status === undefined || status >= 500 || status === 408 || status === 429;
+    return status !== undefined && (status >= 500 || status === 408 || status === 429);
   }
 }
 
@@ -94,8 +107,11 @@ export function storeErrorInfo(error: unknown): StoreErrorInfo {
   return errorInfo({ message: sanitize(error instanceof Error ? error.message : String(error)) ?? "Error desconocido" });
 }
 
-/** Reintentos con espera creciente para escrituras críticas. */
-export const RETRY = { attempts: 3, timeoutMs: 4_000, backoffMs: [400, 1_200] } as const;
+/**
+ * Reintentos con espera y tiempo límite crecientes para escrituras críticas. Peor caso ≈ 19 s,
+ * más la verificación tras un tiempo agotado (≤ 3 s): cabe en `maxDuration` de /api/leads.
+ */
+export const RETRY = { attempts: 3, timeoutMs: [5_000, 6_500, 6_500], backoffMs: [300, 700], verifyTimeoutMs: 3_000 } as const;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withRetry<T>(label: string, run: () => Promise<T>, onRetry?: (attempt: number, error: unknown) => void): Promise<T> {
@@ -105,7 +121,8 @@ async function withRetry<T>(label: string, run: () => Promise<T>, onRetry?: (att
       return await run();
     } catch (error) {
       lastError = error;
-      const transient = !(error instanceof LeadStoreError) || error.transient;
+      // Un error que no viene de Supabase (p. ej. un fallo de programación) tampoco se reintenta.
+      const transient = error instanceof LeadStoreError && error.transient;
       if (!transient || attempt === RETRY.attempts) break;
       onRetry?.(attempt, error);
       await sleep(RETRY.backoffMs[attempt - 1] ?? 1_500);
@@ -134,20 +151,24 @@ function client() {
         signal: AbortSignal.timeout(init.timeoutMs ?? 8_000),
       });
     } catch (error) {
-      // Red caída o tiempo agotado: se trata como falla pasajera (sin código HTTP).
       const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
-      const cause = error instanceof Error ? (error.cause as { code?: string } | undefined)?.code : undefined;
+      const cause = error instanceof Error ? (error.cause as { code?: string } | undefined) : undefined;
+      // Sin `cause`, fetch no llegó a conectarse: la petición no se pudo construir (p. ej. una clave con un
+      // salto de línea es un encabezado inválido). Es un error de configuración: reintentarlo no sirve.
+      const config = !timeout && error instanceof TypeError && !cause;
       throw new LeadStoreError("", undefined, errorInfo({
-        code: timeout ? "TIMEOUT" : "NETWORK",
+        code: timeout ? "TIMEOUT" : config ? "CONFIG" : "NETWORK",
         message: timeout
           ? `Sin respuesta en ${init.timeoutMs ?? 8_000} ms`
-          : `No se pudo conectar con ${new URL(url).host}${cause ? ` (${cause})` : ""}: ${sanitize(error instanceof Error ? error.message : String(error), 160)}`,
+          : config
+            ? `Petición inválida: ${sanitize(error instanceof Error ? error.message : String(error), 160)}`
+            : `No se pudo conectar con ${new URL(url).host}${cause?.code ? ` (${cause.code})` : ""}: ${sanitize(error instanceof Error ? error.message : String(error), 160)}`,
       }));
     }
     const body = await response.text();
     if (!response.ok) {
       // Cuerpo de error de PostgREST: { code, message, details, hint }. `details` se descarta (puede traer la fila).
-      let parsed: { code?: unknown; message?: unknown; hint?: unknown } = {};
+      let parsed: { code?: unknown; message?: unknown; hint?: unknown; details?: unknown } = {};
       try {
         parsed = JSON.parse(body);
       } catch {
@@ -158,6 +179,8 @@ function client() {
         code: typeof parsed.code === "string" ? parsed.code : undefined,
         message: sanitize(parsed.message) ?? sanitize(body, 160) ?? response.statusText ?? "Sin mensaje",
         hint: sanitize(parsed.hint),
+        details: sanitize(parsed.details, 200),
+        supabaseRequestId: response.headers.get("sb-request-id") ?? response.headers.get("x-request-id") ?? response.headers.get("cf-ray") ?? undefined,
       }));
     }
     return (body ? JSON.parse(body) : null) as T;
@@ -249,23 +272,76 @@ function requireClient() {
  */
 export async function saveLead(lead: LeadRecord, onRetry?: (attempt: number, error: unknown) => void): Promise<LeadRow> {
   const request = requireClient();
+  const startedAt = Date.now();
+  let attempt = 0;
+  let timedOut = false;
   // Reintentar es seguro: la escritura es un upsert por conversation_id (no duplica leads).
-  return withRetry(
-    "saveLead",
-    async () => {
-      const rows = await request<Row[]>(`${TABLE}?on_conflict=conversation_id`, {
-        method: "POST",
-        prefer: "resolution=merge-duplicates,return=representation",
-        body: JSON.stringify(fromRecord(lead)),
-        timeoutMs: RETRY.timeoutMs,
-      });
-      if (!Array.isArray(rows) || !rows[0]?.id) {
-        throw new LeadStoreError("", 502, errorInfo({ httpStatus: 502, code: "NO_ROW", message: "Supabase no confirmó la escritura del lead." }));
-      }
-      return toRow(rows[0]);
-    },
-    onRetry,
+  try {
+    return await withRetry(
+      "saveLead",
+      async () => {
+        const timeoutMs = RETRY.timeoutMs[attempt++] ?? RETRY.timeoutMs[RETRY.timeoutMs.length - 1];
+        try {
+          const rows = await request<Row[]>(`${TABLE}?on_conflict=conversation_id`, {
+            method: "POST",
+            prefer: "resolution=merge-duplicates,return=representation",
+            body: JSON.stringify(fromRecord(lead)),
+            timeoutMs,
+          });
+          if (!Array.isArray(rows) || !rows[0]?.id) {
+            throw new LeadStoreError("", 502, errorInfo({ httpStatus: 502, code: "NO_ROW", message: "Supabase no confirmó la escritura del lead." }));
+          }
+          return toRow(rows[0]);
+        } catch (error) {
+          if (error instanceof LeadStoreError && error.info.code === "TIMEOUT") timedOut = true;
+          throw error;
+        }
+      },
+      onRetry,
+    );
+  } catch (error) {
+    // Supabase puede completar la escritura aunque la respuesta llegue tarde: antes de declarar la
+    // falla se comprueba si el lead quedó guardado (actualizado desde que empezó este envío).
+    if (timedOut) {
+      const saved = await findSavedSince(lead.conversationId, startedAt).catch(() => null);
+      if (saved) return saved;
+    }
+    throw error;
+  }
+}
+
+/** Lead de la conversación escrito desde `since` (margen de 5 s por diferencias de reloj con la base). */
+async function findSavedSince(conversationId: string, since: number): Promise<LeadRow | null> {
+  const request = requireClient();
+  const from = new Date(since - 5_000).toISOString();
+  const rows = await request<Row[]>(
+    `${TABLE}?conversation_id=eq.${encodeURIComponent(conversationId)}&updated_at=gte.${encodeURIComponent(from)}&select=*&limit=1`,
+    { timeoutMs: RETRY.verifyTimeoutMs },
   );
+  return rows[0]?.id ? toRow(rows[0]) : null;
+}
+
+/** Destino de Supabase para los registros: host y tipo de clave, nunca la clave. */
+export function storeTarget(): { host?: string; keyKind: string } {
+  const { url, serviceRoleKey: key } = leadsConfig.supabase;
+  let host: string | undefined;
+  try {
+    host = url ? new URL(url).host : undefined;
+  } catch {
+    host = "URL inválida";
+  }
+  let keyKind = "ausente";
+  if (key?.startsWith("sb_secret_")) keyKind = "sb_secret";
+  else if (key?.startsWith("sb_publishable_")) keyKind = "sb_publishable (NO sirve para escribir)";
+  else if (key) {
+    try {
+      const role = JSON.parse(Buffer.from(key.split(".")[1] ?? "", "base64url").toString("utf8")).role;
+      keyKind = `jwt:${role ?? "sin rol"}`;
+    } catch {
+      keyKind = "formato desconocido";
+    }
+  }
+  return { host, keyKind };
 }
 
 const LIST_COLUMNS =
@@ -333,7 +409,7 @@ export async function storeWriteCheck(): Promise<{ ok: true; latencyMs: number }
       method: "POST",
       prefer: "resolution=merge-duplicates,return=representation",
       body: JSON.stringify({ id: "write-check", checked_at: new Date().toISOString() }),
-      timeoutMs: RETRY.timeoutMs,
+      timeoutMs: RETRY.timeoutMs[0],
     });
     if (!rows.length) return { ok: false, reason: "Supabase no confirmó la escritura de prueba." };
     return { ok: true, latencyMs: Date.now() - started };

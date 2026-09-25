@@ -13,6 +13,7 @@ npm run build      # build de producción (la home es estática; /api/leads corr
 npm run start      # servir el build
 npm run lint
 npm run typecheck
+npm test           # conversación (test:assistant) + persistencia de leads (test:leads)
 ```
 
 Copia `.env.example` a `.env.local` y define `NEXT_PUBLIC_SITE_URL` con el dominio real
@@ -50,6 +51,17 @@ transparente y redimensiona), todos los derivados: `src/assets/brand/jp-isotipo.
 `<JpMark />` en navbar, hero, footer, marcas de agua y 404), el favicon `src/app/icon.png`,
 `src/app/apple-icon.png`, los iconos del manifest y la silueta `public/brand/jp-mask.png`
 del destello metálico. La imagen Open Graph también usa el isotipo.
+
+## Jeipy AI: respuestas en lenguaje libre
+
+Antes de avanzar el flujo, cada respuesta se clasifica según la pregunta pendiente (`src/features/assistant/interpret.ts`):
+`positive`, `negative`, `uncertain`, `question`, `correction`, `budget_objection`, `free_text_information` o `unknown`.
+- La postura se lee por señales, no por frases exactas (`polarity.ts`): palabras de acuerdo, verbos de interés con su negación cercana, duda y "para después".
+- Tolera errores de escritura, letras repetidas, falta de tildes y abreviaturas de chat.
+- Una respuesta aporta todos sus datos, las correcciones actualizan el perfil y recalculan la recomendación, y se guarda el texto original.
+- Solo pide aclaración cuando no hay nada que interpretar, y con una pregunta concreta.
+
+`npm run test:assistant` prueba las frases en contexto.
 
 ## Leads de Jeipy AI y bandeja del equipo
 
@@ -96,6 +108,9 @@ El asistente solo muestra "Solicitud recibida" cuando un mecanismo persistente c
 - Texto seguro: todo recorte de texto del visitante usa `safeSlice` (`src/lib/text.ts`), que nunca parte un emoji. Un emoji partido deja un carácter inválido y Supabase rechaza el lead completo (400 `PGRST102`).
 - Cada falla de guardado es un **error** en los registros de Vercel (`ERROR DE PERSISTENCIA`), en una línea JSON con `requestId`, código HTTP, código de Supabase/Postgres, mensaje saneado, columna/constraint y diagnóstico. Nunca incluye la clave ni los datos del lead.
 - `GET /api/health?probe=lead` (sesión del equipo o token) compara el schema real de `public.leads` con lo que envía el servidor. Además guarda, lee y cierra un lead de prueba ("PRUEBA DIAGNÓSTICO", siempre la misma fila) con el payload real de Jeipy AI, y devuelve el error exacto si algo falla.
+- Reintentos solo para fallas pasajeras (tiempo agotado, red, 5xx, 408, 429), con límites de 5 s, 6,5 s y 6,5 s. Un 4xx (schema, constraint, campo inválido, autorización) o una clave con caracteres inválidos (`CONFIG`) se diagnostica en el primer intento, sin repetirlo.
+- Si algún intento agotó el tiempo, antes de declarar la falla se comprueba si Supabase guardó el lead de todas formas (la escritura puede completarse aunque la respuesta llegue tarde).
+- La línea `ERROR DE PERSISTENCIA` incluye además `details` y `hint` saneados, el id de la petición de Supabase, el destino (host y tipo de clave, nunca la clave) y la forma del payload (columnas, status, longitudes; sin nombre, teléfono ni textos).
 - `npm run test:leads` prueba el payload real de Jeipy AI contra `supabase/leads.sql`. Con `LEADS_TEST_BASE_URL`, `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` prueba además API → Supabase → lectura del lead.
 - `/admin/sistema` muestra la salud en vivo, qué respaldo está realmente operativo y qué variables faltan, con botones para enviar un correo o webhook de prueba real.
 - Las fallas repetidas (o un lead sin respaldo) generan una alerta por correo y/o webhook.

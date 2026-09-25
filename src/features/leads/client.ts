@@ -53,8 +53,8 @@ async function post(payload: Payload): Promise<LeadSubmitResult> {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-        // El servidor reintenta Supabase (~15 s máx.); el navegador nunca se queda esperando indefinidamente.
-        signal: AbortSignal.timeout(25_000),
+        // El servidor reintenta Supabase (≈30 s máx. con verificación y respaldo); el navegador nunca espera indefinidamente.
+        signal: AbortSignal.timeout(36_000),
       });
       const result = (await response.json().catch(() => null)) as LeadSubmitResult | null;
       // Éxito solo con la confirmación del servidor (id del lead guardado en la base de datos).

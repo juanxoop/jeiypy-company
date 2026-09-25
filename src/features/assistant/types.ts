@@ -130,6 +130,11 @@ export type ConversationState = {
   consentGiven: boolean;
   /** Hay un envío autorizado pendiente o fallido (permite reintentar). */
   pendingSubmission: boolean;
+  /**
+   * Respuestas a las preguntas del asistente con su texto ORIGINAL y cómo se interpretaron
+   * (positive, negative, uncertain, correction…). Últimas 30.
+   */
+  answers?: { slot: string; raw: string; kind: string }[];
 };
 
 /**

@@ -53,6 +53,8 @@ import {
   tierCost,
   type Tier,
 } from "./ladder";
+import { interpretReply, type Interpretation } from "./interpret";
+import { readPolarity } from "./polarity";
 import { aiCostNote, alternativeCard, needsAiLevelQuestion, pickTier, recommendPlan } from "./recommend";
 import type {
   AiTierId,
@@ -352,22 +354,47 @@ function fillSlot(slot: Slot, input: string, state: ConversationState): Filled |
       return next(GOAL_ACK[value]);
     }
     case "budget": {
-      const value = extractBudget(input);
+      // "No", "no sé", "prefiero no decirlo": sin cifra, no se insiste.
+      const polarity = readPolarity(input).polarity;
+      const value = extractBudget(input) ?? (polarity === "negative" || polarity === "uncertain" ? "skipped" : undefined);
       if (!value) return null;
       profile.budget = value !== "skipped" && normalize(input).includes(" mas de ") ? { amount: value.amount + 1 } : value;
       return next(value === "skipped" ? "Sin problema." : "Gracias, lo tengo en cuenta.");
     }
     case "feature": {
-      // "No quiero reservas" ante la pregunta de IA habla de otra función: no es la respuesta.
+      const feature = slot.feature;
+      const label = FEATURE_SHORT[feature];
+      // Si nombra la función que se pregunta, eso es la respuesta ("no quiero catálogo, quiero reservas").
       const mentioned = extractFeatures(input);
-      if (Object.keys(mentioned).length && mentioned[slot.feature] === undefined) return null;
-      const answer = parseYesNo(input);
-      if (!answer) return null;
-      profile.features[slot.feature] = answer === "yes";
-      return next();
+      if (mentioned[feature] !== undefined) {
+        profile.features[feature] = mentioned[feature];
+        return next();
+      }
+      // Habla de otra función ("no quiero reservas" ante la pregunta de IA): no es la respuesta.
+      if (Object.keys(mentioned).length) return null;
+      // Postura leída por señales, no por frases exactas ("me encanta", "nah, eso no", "puede ser"…).
+      const reading = readPolarity(input);
+      // "Tengo Instagram pero no web": el "no" es un dato, no la respuesta a esta pregunta.
+      if (!reading.polarity || (reading.bareNegation && extractPresence(input).mentioned)) return null;
+      if (reading.polarity === "positive") {
+        profile.features[feature] = !reading.later;
+        return next(reading.later ? `Perfecto: arrancamos con lo esencial y dejamos ${label} para una segunda etapa.` : undefined);
+      }
+      if (reading.polarity === "negative") {
+        profile.features[feature] = false;
+        return next(reading.later ? `Listo, dejamos ${label} para más adelante.` : undefined);
+      }
+      // Duda: se sigue con lo más probable y se dice cómo quedó, sin volver a preguntar.
+      if (reading.lean === "positive") {
+        profile.features[feature] = true;
+        return next(`Lo incluyo como opción en la propuesta; si después prefieres dejar ${label} para más adelante, lo ajustamos.`);
+      }
+      profile.features[feature] = false;
+      return next(`Sin problema: dejo ${label} como opcional por ahora y seguimos.`);
     }
     case "aiLevel": {
-      const value = parseAiLevelAnswer(input);
+      // "No sé todavía": se empieza por lo básico, que se puede ampliar después.
+      const value = parseAiLevelAnswer(input) ?? (readPolarity(input).polarity === "uncertain" ? "basic" : undefined);
       if (!value) return null;
       profile.aiLevel = value;
       if (value === "advanced") profile.features.automation = true;
@@ -1205,7 +1232,56 @@ function startAiTierFlow(id: AiTierId, state: ConversationState): Reply {
    Punto de entrada
    --------------------------------------------------------------- */
 
+/** Una sola pregunta concreta cuando la respuesta no se pudo interpretar. */
+function clarify(slot: Slot, state: ConversationState): { blocks: MessageBlock[]; quickReplies?: string[] } {
+  const q = question(slot, state);
+  switch (slot.kind) {
+    case "phone":
+      return { blocks: [text("Necesito un número de teléfono válido, por ejemplo 300 123 4567.")], quickReplies: q.quickReplies };
+    case "email":
+      return { blocks: [text("No reconocí el correo. Puedes escribirlo de nuevo u omitirlo.")], quickReplies: q.quickReplies };
+    case "feature":
+      return {
+        blocks: [text(`Para asegurarme: ¿quieres incluir ${FEATURE_SHORT[slot.feature]} o lo dejamos para más adelante?`)],
+        quickReplies: ["Sí, inclúyelo", "Por ahora no"],
+      };
+    case "website":
+      return {
+        blocks: [text("Para ubicarme: ¿hoy tu negocio está en WhatsApp, redes sociales o una página web? Si todavía no tiene nada, también me sirve saberlo.")],
+        quickReplies: q.quickReplies,
+      };
+    case "goal":
+      return {
+        blocks: [text("¿Qué te gustaría lograr primero: conseguir más clientes, verte más profesional o mostrar lo que vendes?")],
+        quickReplies: q.quickReplies,
+      };
+    case "businessType":
+      return { blocks: [text("¿A qué se dedica tu negocio? Por ejemplo: tienda, restaurante, barbería o servicios profesionales.")], quickReplies: q.quickReplies };
+    case "budget":
+      return { blocks: [text("¿Tienes una cifra aproximada en mente? Si prefieres no decirla, no hay problema.")], quickReplies: q.quickReplies };
+    case "consent":
+      return {
+        blocks: [text("Para enviar tu solicitud necesito tu autorización: ¿nos autorizas a contactarte sobre esta solicitud?")],
+        quickReplies: ["Sí, autorizo", "No"],
+      };
+    default:
+      return { blocks: [text("Para asegurarme de entenderte bien:"), ...q.blocks], quickReplies: q.quickReplies };
+  }
+}
+
+/**
+ * Responde al visitante. Si había una pregunta pendiente, guarda la respuesta con su texto
+ * original y su interpretación (ver `interpret.ts`).
+ */
 export function respond(input: string, current: ConversationState): Reply {
+  const turn = respondTo(input, current);
+  if (!current.expecting) return turn;
+  const { kind }: Interpretation = interpretReply(input, current);
+  const answers = [...(turn.state.answers ?? current.answers ?? []), { slot: slotKey(current.expecting), raw: input, kind }].slice(-30);
+  return { ...turn, state: { ...turn.state, answers } };
+}
+
+function respondTo(input: string, current: ConversationState): Reply {
   const t = normalize(input);
   const intent = detectIntent(input);
 
@@ -1233,7 +1309,17 @@ export function respond(input: string, current: ConversationState): Reply {
       if (answer === "yes") {
         return recommend({ ...base, planCap: slot.tier }, [text("Perfecto, ajustemos la propuesta. Así quedaría:")], slot.tier, { confirmed: true });
       }
-      if (answer === "no" || t.includes(" lo mantengo")) {
+      if (answer === "later") {
+        // "Déjame pensarlo", "no sé todavía": sin presión; la alternativa queda disponible.
+        return {
+          blocks: [
+            text(`Claro, piénsalo con calma. Cuando quieras, me dices si prefieres empezar con ${tierLabel(slot.tier)} o mantener ${tierLabel(slot.from)}; también puedo explicarte la diferencia.`),
+          ],
+          quickReplies: ["Sí, me interesa", "¿Cuál es la diferencia?", "Mantener la opción completa"],
+          state: current,
+        };
+      }
+      if (answer === "no" || t.includes(" lo mantengo") || t.includes(" mantener")) {
         if (!current.recommended) return recommend(base, [text("Perfecto, mantengamos la opción completa.")]);
         return {
           blocks: [
@@ -1249,9 +1335,11 @@ export function respond(input: string, current: ConversationState): Reply {
       // "No entiendo" no es un "no": se explica la pregunta.
       return explainAgain(current);
     } else if (slot.kind === "consent") {
+      // Primero la negativa: "no autorizo" contiene "autorizo".
+      const { polarity } = readPolarity(input);
       const t2 = normalize(input);
-      if (t2.includes(" autorizo") || t2.includes(" acepto") || parseYesNo(input) === "yes") return submitLead(current);
-      if (parseYesNo(input) === "no" || declines(input)) return abortLead(current, "Entendido, no envío tus datos.");
+      if (polarity === "negative" || declines(input)) return abortLead(current, "Entendido, no envío tus datos.");
+      if (polarity === "positive" || t2.includes(" autorizo") || t2.includes(" acepto")) return submitLead(current);
     } else if (CONTACT_SLOTS.has(slot.kind) && REQUIRED_SLOTS.has(slot.kind) && declines(input)) {
       return abortLead(current);
     } else {
@@ -1322,19 +1410,32 @@ export function respond(input: string, current: ConversationState): Reply {
       }
     }
 
+    // "No sé", "tal vez", "déjame pensarlo" ante una pregunta del diagnóstico: no se insiste, se sigue.
+    if (diagnosing && readPolarity(input).polarity === "uncertain") {
+      return advance({ ...current, expecting: null, skipped: [...current.skipped, slotKey(slot)], retries: 0 }, [
+        text("Sin problema, lo dejamos abierto por ahora y lo definimos con el equipo."),
+      ]);
+    }
+
+    // Solo si de verdad no hay nada que interpretar: UNA pregunta concreta, no un "no entendí".
     if (current.retries < 1) {
-      const q = question(slot, current);
-      const hint =
-        slot.kind === "phone"
-          ? "Necesito un número de teléfono válido, por ejemplo 300 123 4567."
-          : slot.kind === "email"
-            ? "No reconocí el correo. Puedes escribirlo de nuevo u omitirlo."
-            : "Perdona, no te entendí bien.";
-      return { blocks: [text(hint), ...q.blocks], quickReplies: q.quickReplies, state: { ...current, retries: current.retries + 1 } };
+      const clarification = clarify(slot, current);
+      return { ...clarification, state: { ...current, retries: current.retries + 1 } };
     }
     // Sin nombre, teléfono ni autorización no se envía nada.
     if (REQUIRED_SLOTS.has(slot.kind)) return abortLead(current);
     return advance({ ...current, expecting: null, skipped: [...current.skipped, slotKey(slot)], retries: 0 }, [text("No te preocupes, sigamos.")]);
+  }
+
+  // Corrección del presupuesto sin cifra ("en realidad mi presupuesto es menor"): se pregunta la cifra
+  // y la recomendación se recalcula con ella.
+  const reply = interpretReply(input, current);
+  if (reply.budgetChange && !extractBudget(input)) {
+    return {
+      blocks: [text(`Claro, lo ajustamos. ¿Cuánto tienes pensado invertir aproximadamente? Con esa cifra recalculo la recomendación.`)],
+      quickReplies: ["Hasta $1.000.000", "Hasta $2.400.000", "Prefiero no decirlo"],
+      state: { ...current, expecting: { kind: "budget" }, retries: 0, profile: { ...current.profile, budget: undefined } },
+    };
   }
 
   // 2. Cierre y atención humana: siempre se respetan.
@@ -1481,6 +1582,15 @@ export function respond(input: string, current: ConversationState): Reply {
       return continueWith(withProfile, [text(ack ?? "Gracias por el dato, lo tengo en cuenta.")]);
     }
     return startFlow("advisor", withProfile, ack ? `${ack} Para recomendarte bien, sigamos.` : "Perfecto. Para recomendarte bien, quiero entender cómo trabajas hoy.");
+  }
+
+  // Una corrección que confirma lo que ya se sabía ("perdón, sí tengo Instagram"): se confirma, no se ignora.
+  if (reply.kind === "correction" && extractPresence(input).mentioned) {
+    return {
+      blocks: [text(`Gracias por aclararlo. ${presenceAck(current.profile)}`)],
+      quickReplies: current.recommended ? CHIPS.afterRecommendation : CHIPS.afterInfo,
+      state: current,
+    };
   }
 
   // 7. Un "sí" o "no" suelto sin pregunta pendiente.

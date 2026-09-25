@@ -10,8 +10,8 @@ import { validateLead } from "@/server/leads/validate";
  * registros del servidor con un `requestId` que también recibe el navegador.
  */
 
-/** Reintentos contra Supabase + correo en paralelo: margen suficiente sin colgar al cliente. */
-export const maxDuration = 30;
+/** Reintentos contra Supabase (≈19 s en el peor caso) + verificación + respaldo: margen sin colgar al cliente. */
+export const maxDuration = 40;
 
 const json = (body: LeadSubmitResult, status: number) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 

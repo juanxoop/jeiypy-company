@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:leads": "tsx --conditions=react-server scripts/test-lead-persistence.ts"
+    "test:leads": "tsx --conditions=react-server scripts/test-lead-persistence.ts",
+    "test:assistant": "tsx --conditions=react-server scripts/test-assistant-language.ts",
+    "test": "npm run test:assistant && npm run test:leads"
   },
   "dependencies": {
     "framer-motion": "^13.4.1",
