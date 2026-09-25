@@ -4,6 +4,7 @@
  */
 import type { ChatMessage, LeadDraft, MessageBlock } from "@/features/assistant/types";
 import type { LeadSubmitResult, TranscriptEntry } from "./types";
+import { safeSlice } from "@/lib/text";
 
 /** Texto legible de un mensaje del asistente, para el historial interno. */
 function blockText(block: MessageBlock): string | null {
@@ -30,9 +31,9 @@ function blockText(block: MessageBlock): string | null {
 export function toTranscript(messages: ChatMessage[]): TranscriptEntry[] {
   return messages
     .map((message): TranscriptEntry | null => {
-      if (message.role === "user") return { role: "user", text: message.text.slice(0, 1_000) };
+      if (message.role === "user") return { role: "user", text: safeSlice(message.text, 1_000) };
       const text = message.blocks.map(blockText).filter(Boolean).join("\n");
-      return text ? { role: "assistant", text: text.slice(0, 1_000) } : null;
+      return text ? { role: "assistant", text: safeSlice(text, 1_000) } : null;
     })
     .filter((entry): entry is TranscriptEntry => entry !== null)
     .slice(-60);

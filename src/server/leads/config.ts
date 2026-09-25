@@ -4,11 +4,13 @@ import "server-only";
  * Configuración del sistema de leads. Todo se lee de variables de entorno del servidor:
  * nada de esto llega al navegador (ninguna variable lleva el prefijo NEXT_PUBLIC_).
  */
-const env = (name: string) => process.env[name]?.trim() || undefined;
+/** Sin espacios ni comillas pegadas por error al copiar el valor en Vercel. */
+const env = (name: string) => process.env[name]?.trim().replace(/^(["'])(.*)\1$/, "$2").trim() || undefined;
 
 export const leadsConfig = {
   supabase: {
-    url: env("SUPABASE_URL")?.replace(/\/$/, ""),
+    // Acepta la URL del proyecto con o sin "/" final o "/rest/v1": el cliente añade la ruta de la API.
+    url: env("SUPABASE_URL")?.replace(/\/+$/, "").replace(/\/rest\/v1$/, ""),
     serviceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
   },
   /** Destinatarios de la notificación. Admite varios separados por coma. */

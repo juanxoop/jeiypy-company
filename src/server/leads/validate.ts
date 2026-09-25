@@ -1,6 +1,7 @@
 import "server-only";
 import type { AiLevel, AiTierId, DigitalChannel, Feature, Goal, PlanId, WebsiteStatus } from "@/features/assistant/types";
 import type { ContactChannel, LeadIntent, LeadSubmission, TranscriptEntry } from "@/features/leads/types";
+import { safeSlice } from "@/lib/text";
 
 /**
  * Validación estricta de lo que envía el navegador. Nada del cliente se da por bueno:
@@ -20,10 +21,11 @@ const MAX_TRANSCRIPT = 80;
 
 type Obj = Record<string, unknown>;
 
+// Recorte seguro: nunca parte un emoji (un sustituto suelto hace que Supabase rechace el lead completo).
 const text = (value: unknown, max: number): string | undefined => {
   if (typeof value !== "string") return undefined;
-  const clean = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
-  return clean ? clean.slice(0, max) : undefined;
+  const clean = safeSlice(value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim(), max).trim();
+  return clean || undefined;
 };
 const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined =>
   typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : undefined;
@@ -43,7 +45,8 @@ function transcript(value: unknown): TranscriptEntry[] | undefined {
     .map((entry) => {
       const e = (entry ?? {}) as Obj;
       const role = oneOf(e.role, ["user", "assistant"] as const);
-      const body = typeof e.text === "string" ? e.text.trim().slice(0, 1500) : undefined;
+      // Sin NUL (jsonb no lo admite) y sin partir emojis.
+      const body = typeof e.text === "string" ? safeSlice(e.text.replace(/\u0000/g, "").trim(), 1500) || undefined : undefined;
       return role && body ? { role, text: body } : null;
     })
     .filter((e): e is TranscriptEntry => e !== null);

@@ -4,6 +4,7 @@
  */
 import type { UnknownTopic } from "./knowledge";
 import type { AiLevel, AiTierId, Budget, DigitalChannel, Feature, FeatureMap, Goal, PlanId, Profile, WebsiteStatus } from "./types";
+import { safeSlice } from "@/lib/text";
 
 export function normalize(text: string): string {
   return ` ${text
@@ -421,7 +422,7 @@ export function extractBusinessDescription(raw: string): string | undefined {
   const describesActivity = has(t, " vendo", " vendemos", " ofrezco", " ofrecemos", " me dedico", " nos dedicamos", " fabrico", " hacemos", " hago ", " trabajo con", " distribuimos", " distribuyo");
   if (!describesActivity && !extractBusinessType(raw)) return undefined;
   const clean = raw.replace(/\s+/g, " ").trim();
-  return clean.length >= 12 ? clean.slice(0, 280) : undefined;
+  return clean.length >= 12 ? safeSlice(clean, 280) : undefined;
 }
 
 /* ---------------------------------------------------------------

@@ -93,6 +93,10 @@ El asistente solo muestra "Solicitud recibida" cuando un mecanismo persistente c
   - se reintentan solos (al volver la conexión, cada 60 s y con `sendBeacon` al cerrar la pestaña);
   - puede reintentar con un botón o seguir por WhatsApp o llamada.
 - Límite anti-abuso: 30 leads distintos por IP cada 10 min. Reintentar el mismo lead (misma conversación) nunca consume cupo ni queda bloqueado.
+- Texto seguro: todo recorte de texto del visitante usa `safeSlice` (`src/lib/text.ts`), que nunca parte un emoji. Un emoji partido deja un carácter inválido y Supabase rechaza el lead completo (400 `PGRST102`).
+- Cada falla de guardado es un **error** en los registros de Vercel (`ERROR DE PERSISTENCIA`), en una línea JSON con `requestId`, código HTTP, código de Supabase/Postgres, mensaje saneado, columna/constraint y diagnóstico. Nunca incluye la clave ni los datos del lead.
+- `GET /api/health?probe=lead` (sesión del equipo o token) compara el schema real de `public.leads` con lo que envía el servidor. Además guarda, lee y cierra un lead de prueba ("PRUEBA DIAGNÓSTICO", siempre la misma fila) con el payload real de Jeipy AI, y devuelve el error exacto si algo falla.
+- `npm run test:leads` prueba el payload real de Jeipy AI contra `supabase/leads.sql`. Con `LEADS_TEST_BASE_URL`, `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` prueba además API → Supabase → lectura del lead.
 - `/admin/sistema` muestra la salud en vivo, qué respaldo está realmente operativo y qué variables faltan, con botones para enviar un correo o webhook de prueba real.
 - Las fallas repetidas (o un lead sin respaldo) generan una alerta por correo y/o webhook.
 - `GET /api/health` (sesión del equipo o `Authorization: Bearer $HEALTHCHECK_TOKEN`) comprueba backend, lectura y escritura no destructiva en Supabase. Responde 503 si algo falla, para que un monitor avise.

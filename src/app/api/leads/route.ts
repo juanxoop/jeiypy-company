@@ -18,9 +18,21 @@ const json = (body: LeadSubmitResult, status: number) => Response.json(body, { s
 export async function POST(request: NextRequest) {
   const requestId = crypto.randomUUID().slice(0, 8);
 
-  // Solo peticiones desde el propio sitio.
+  // Solo peticiones desde el propio sitio (detrás de Vercel o un proxy, el dominio también llega en x-forwarded-host).
   const origin = request.headers.get("origin");
-  if (origin && new URL(origin).host !== request.headers.get("host")) return json({ ok: false, error: "invalid", requestId }, 403);
+  if (origin) {
+    let originHost = "";
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      /* origen malformado: se rechaza abajo */
+    }
+    const hosts = [request.headers.get("host"), ...(request.headers.get("x-forwarded-host") ?? "").split(",").map((h) => h.trim())].filter(Boolean);
+    if (!hosts.includes(originHost)) {
+      console.warn(`[leads ${requestId}] Origen rechazado: ${originHost || origin.slice(0, 80)} no coincide con ${hosts.join(", ") || "(sin host)"}`);
+      return json({ ok: false, error: "invalid", requestId }, 403);
+    }
+  }
 
   const raw = await request.text();
   // Margen amplio: el historial se recorta en el cliente y en el servidor; un lead real nunca debe rechazarse por tamaño.

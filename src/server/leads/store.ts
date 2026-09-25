@@ -12,18 +12,86 @@ const TABLE = "leads";
 const NOTES = "lead_notes";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Error de Supabase en forma segura para registros y alertas: código HTTP, código de error
+ * (PostgREST "PGRST…" o Postgres "23514"…), mensaje saneado y columna/constraint afectados.
+ * Nunca incluye la clave ni los datos del lead: Postgres pone la fila completa en `details`
+ * ("Failing row contains (…)") y ese campo se descarta.
+ */
+export type StoreErrorInfo = {
+  httpStatus?: number;
+  /** PGRST204, 23514, 42501… o TIMEOUT / NETWORK / NO_ROW si no hubo respuesta útil. */
+  code?: string;
+  message: string;
+  hint?: string;
+  column?: string;
+  constraint?: string;
+  /** Qué significa y qué revisar, en palabras simples. */
+  diagnosis: string;
+};
+
+/** Deja los identificadores ("leads_status_check") y oculta los valores entre comillas (datos del visitante). */
+function sanitize(value: unknown, max = 240): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return value
+    .replace(/Failing row contains[\s\S]*/i, "Failing row contains (…)")
+    .replace(/(["'])([^"']*)\1/g, (m, q: string, inner: string) => (/^[\w.-]{1,63}$/.test(inner) ? m : `${q}…${q}`))
+    .slice(0, max);
+}
+
+function diagnose(info: Omit<StoreErrorInfo, "diagnosis">): string {
+  const { code, httpStatus, column, constraint } = info;
+  if (code === "TIMEOUT") return "Supabase no respondió a tiempo. Revisa el estado del proyecto (¿pausado por inactividad?) y la región.";
+  if (code === "NETWORK") return "No se pudo conectar con Supabase (DNS/red). Revisa SUPABASE_URL y que el proyecto esté activo.";
+  if (code === "NO_ROW") return "Supabase respondió sin devolver la fila guardada.";
+  if (code === "PGRST102") return "Supabase rechazó el cuerpo por JSON inválido (p. ej. un emoji partido al recortar texto).";
+  if (code === "PGRST204" || code === "42703") return `La columna${column ? ` "${column}"` : ""} no existe en public.leads: ejecuta de nuevo supabase/leads.sql.`;
+  if (code === "PGRST205" || code === "42P01") return "La tabla no existe en Supabase: ejecuta supabase/leads.sql.";
+  if (code === "23514") return `Un valor no cumple el constraint${constraint ? ` "${constraint}"` : ""} (p. ej. un estado no permitido).`;
+  if (code === "23502") return `La columna${column ? ` "${column}"` : ""} no admite valores vacíos (null).`;
+  if (code === "23505") return `Registro duplicado${constraint ? ` (constraint "${constraint}")` : ""}.`;
+  if (code === "42501") return "Permiso denegado: revisa los GRANT de service_role (supabase/leads.sql) y que la clave sea la service_role/secret.";
+  if (code?.startsWith("22")) return "Un valor tiene un tipo o formato que Postgres no acepta.";
+  if (httpStatus === 401 || httpStatus === 403 || code === "PGRST301" || code === "PGRST302")
+    return "Supabase rechazó la clave: revisa SUPABASE_SERVICE_ROLE_KEY (debe ser la service_role o una clave secreta sb_secret_).";
+  if (httpStatus === 404) return "Ruta no encontrada: revisa SUPABASE_URL (debe ser https://<proyecto>.supabase.co).";
+  if (httpStatus !== undefined && httpStatus >= 500) return "Error del servidor de Supabase (caído, pausado o sobrecargado).";
+  return "Error no clasificado de Supabase: revisa el código y el mensaje.";
+}
+
+function errorInfo(fields: Omit<StoreErrorInfo, "diagnosis" | "column" | "constraint">): StoreErrorInfo {
+  const text = `${fields.message} ${fields.hint ?? ""}`;
+  const column = /column "([\w.]+)"/.exec(text)?.[1] ?? /'([\w.]+)' column/.exec(text)?.[1];
+  const constraint = /constraint "([\w.]+)"/.exec(text)?.[1];
+  const base = { ...fields, column, constraint };
+  return { ...base, diagnosis: diagnose(base) };
+}
+
 export class LeadStoreError extends Error {
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message);
+  readonly info: StoreErrorInfo;
+  constructor(message: string, status?: number, info?: StoreErrorInfo) {
+    const details = info ?? errorInfo({ httpStatus: status, message: sanitize(message) ?? "Error de Supabase" });
+    super(
+      `Supabase${details.httpStatus ? ` ${details.httpStatus}` : ""}${details.code ? ` ${details.code}` : ""}: ${details.message}` +
+        `${details.constraint ? ` [constraint ${details.constraint}]` : ""}${details.column ? ` [columna ${details.column}]` : ""}`,
+    );
     this.name = "LeadStoreError";
+    this.info = details;
+  }
+  get status(): number | undefined {
+    return this.info.httpStatus;
   }
   /** Fallas pasajeras que vale la pena reintentar (red, tiempo agotado, 5xx, 408, 429). */
   get transient(): boolean {
-    return this.status === undefined || this.status >= 500 || this.status === 408 || this.status === 429;
+    const status = this.status;
+    return status === undefined || status >= 500 || status === 408 || status === 429;
   }
+}
+
+/** Resumen seguro de cualquier error de guardado, para registros y alertas (sin claves ni datos). */
+export function storeErrorInfo(error: unknown): StoreErrorInfo {
+  if (error instanceof LeadStoreError) return error.info;
+  return errorInfo({ message: sanitize(error instanceof Error ? error.message : String(error)) ?? "Error desconocido" });
 }
 
 /** Reintentos con espera creciente para escrituras críticas. */
@@ -67,10 +135,31 @@ function client() {
       });
     } catch (error) {
       // Red caída o tiempo agotado: se trata como falla pasajera (sin código HTTP).
-      throw new LeadStoreError(`Supabase no respondió: ${error instanceof Error ? error.message : String(error)}`);
+      const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+      const cause = error instanceof Error ? (error.cause as { code?: string } | undefined)?.code : undefined;
+      throw new LeadStoreError("", undefined, errorInfo({
+        code: timeout ? "TIMEOUT" : "NETWORK",
+        message: timeout
+          ? `Sin respuesta en ${init.timeoutMs ?? 8_000} ms`
+          : `No se pudo conectar con ${new URL(url).host}${cause ? ` (${cause})` : ""}: ${sanitize(error instanceof Error ? error.message : String(error), 160)}`,
+      }));
     }
     const body = await response.text();
-    if (!response.ok) throw new LeadStoreError(`Supabase ${response.status}: ${body.slice(0, 400)}`, response.status);
+    if (!response.ok) {
+      // Cuerpo de error de PostgREST: { code, message, details, hint }. `details` se descarta (puede traer la fila).
+      let parsed: { code?: unknown; message?: unknown; hint?: unknown } = {};
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        /* respuesta no JSON (p. ej. página de error del proxy) */
+      }
+      throw new LeadStoreError("", response.status, errorInfo({
+        httpStatus: response.status,
+        code: typeof parsed.code === "string" ? parsed.code : undefined,
+        message: sanitize(parsed.message) ?? sanitize(body, 160) ?? response.statusText ?? "Sin mensaje",
+        hint: sanitize(parsed.hint),
+      }));
+    }
     return (body ? JSON.parse(body) : null) as T;
   };
 }
@@ -113,8 +202,8 @@ function toRow(r: Row): LeadRow {
   };
 }
 
-/** Columnas que escribe el formulario público: nada más (el estado lo calcula el servidor). */
-function fromRecord(lead: LeadRecord): Row {
+/** Columnas que escribe el formulario público: nada más (el estado lo calcula el servidor). Exportada para la prueba de compatibilidad. */
+export function fromRecord(lead: LeadRecord): Row {
   return {
     conversation_id: lead.conversationId,
     status: lead.status,
@@ -170,7 +259,9 @@ export async function saveLead(lead: LeadRecord, onRetry?: (attempt: number, err
         body: JSON.stringify(fromRecord(lead)),
         timeoutMs: RETRY.timeoutMs,
       });
-      if (!Array.isArray(rows) || !rows[0]?.id) throw new LeadStoreError("Supabase no confirmó la escritura del lead.", 502);
+      if (!Array.isArray(rows) || !rows[0]?.id) {
+        throw new LeadStoreError("", 502, errorInfo({ httpStatus: 502, code: "NO_ROW", message: "Supabase no confirmó la escritura del lead." }));
+      }
       return toRow(rows[0]);
     },
     onRetry,

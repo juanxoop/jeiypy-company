@@ -2,10 +2,11 @@ import "server-only";
 import { needsLabels } from "@/features/leads/labels";
 import { buildNarrative, buildReport, classifyLead } from "@/features/leads/report";
 import type { LeadRecord, LeadSubmission } from "@/features/leads/types";
+import { safeSlice } from "@/lib/text";
 import { reportPersistenceFailure } from "./alerts";
 import { isBackupWebhookConfigured, sendLeadToBackupWebhook } from "./backup";
 import { getLeadNotifier } from "./notify";
-import { isStoreConfigured, saveLead } from "./store";
+import { isStoreConfigured, saveLead, storeErrorInfo } from "./store";
 
 export type ProcessResult =
   | { ok: true; id: string; notified: boolean }
@@ -23,7 +24,7 @@ export function buildLeadRecord(lead: LeadSubmission, meta: { userAgent?: string
     summary: buildNarrative(lead),
     report: buildReport(lead, status),
     source: "jeipy-ai",
-    userAgent: meta.userAgent?.slice(0, 300),
+    userAgent: meta.userAgent ? safeSlice(meta.userAgent, 300) : undefined,
   };
 }
 
@@ -43,9 +44,15 @@ export async function processLead(
   const record = buildLeadRecord(lead, meta);
   const notifier = lead.backupNotified ? null : getLeadNotifier();
   const log = (message: string, error?: unknown) => console.error(`[leads ${meta.requestId}] ${message}`, error ?? "");
+  const started = Date.now();
+  let attempts = 1;
 
+  // Cada intento fallido queda registrado con el error de Supabase en forma segura (sin clave ni datos del lead).
   const saving = isStoreConfigured()
-    ? saveLead(record, (attempt, error) => log(`Supabase falló (intento ${attempt}), reintentando…`, error)).then((row) => row.id)
+    ? saveLead(record, (attempt, error) => {
+        attempts = attempt + 1;
+        console.warn(`[leads ${meta.requestId}] Supabase falló en el intento ${attempt}; se reintenta.`, JSON.stringify(storeErrorInfo(error)));
+      }).then((row) => row.id)
     : Promise.reject(new Error("Base de datos no configurada: faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY."));
   const notifying = notifier ? notifier.notify(record) : Promise.resolve(false as const);
 
@@ -55,6 +62,8 @@ export async function processLead(
 
   if (saved.status === "fulfilled") return { ok: true, id: saved.value, notified };
 
+  // Falla del almacenamiento principal: es un ERROR aunque un respaldo haya asegurado el lead.
+  const failure = storeErrorInfo(saved.reason);
   const reason = saved.reason instanceof Error ? saved.reason.message : String(saved.reason);
   let backup: "email" | "webhook" | "none" = notified || lead.backupNotified ? "email" : "none";
   if (backup === "none" && isBackupWebhookConfigured()) {
@@ -65,11 +74,23 @@ export async function processLead(
       log("El webhook de respaldo también falló:", error);
     }
   }
-  log(`No se pudo guardar el lead en Supabase tras los reintentos (respaldo: ${backup}).`, saved.reason);
+  console.error(
+    `[leads ${meta.requestId}] ERROR DE PERSISTENCIA: el lead no se guardó en Supabase.`,
+    JSON.stringify({
+      requestId: meta.requestId,
+      ...failure,
+      attempts,
+      durationMs: Date.now() - started,
+      backup,
+      conversationId: lead.conversationId,
+      status: record.status,
+    }),
+  );
   await reportPersistenceFailure({
     requestId: meta.requestId,
     source: "lead",
     reason,
+    info: failure,
     lead: { name: lead.name, phone: lead.phone },
     backup,
   });

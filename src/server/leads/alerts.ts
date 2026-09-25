@@ -2,6 +2,7 @@ import "server-only";
 import { siteConfig } from "@/config/site";
 import { leadsConfig } from "./config";
 import { sendEmail } from "./notify";
+import type { StoreErrorInfo } from "./store";
 
 /**
  * Alertas de persistencia: si Supabase falla de forma repetida, el equipo se entera antes de
@@ -15,11 +16,17 @@ const THRESHOLD = 2;
 
 const failures: number[] = [];
 let lastAlertAt = 0;
+/** Última falla vista por esta instancia del servidor (para /api/health y /admin/sistema). */
+let lastFailure: { at: string; requestId: string; reason: string; info?: StoreErrorInfo } | undefined;
+
+export const lastPersistenceFailure = () => lastFailure;
 
 export type PersistenceFailure = {
   requestId: string;
   source: "lead" | "health";
   reason: string;
+  /** Error de Supabase en forma segura (código, columna/constraint, diagnóstico). */
+  info?: StoreErrorInfo;
   /** Lead afectado (solo nombre y teléfono, para poder contactarlo si no hubo respaldo). */
   lead?: { name: string; phone: string };
   backup?: "email" | "webhook" | "none";
@@ -33,6 +40,7 @@ export function recentFailureCount(now = Date.now()): number {
 export async function reportPersistenceFailure(failure: PersistenceFailure): Promise<void> {
   const now = Date.now();
   failures.push(now);
+  lastFailure = { at: new Date(now).toISOString(), requestId: failure.requestId, reason: failure.reason, info: failure.info };
   const count = recentFailureCount(now);
   console.error(`[leads-alert] Falla de persistencia (${failure.source}, ref ${failure.requestId}, ${count} en 15 min): ${failure.reason}`);
 
@@ -43,6 +51,7 @@ export async function reportPersistenceFailure(failure: PersistenceFailure): Pro
   const lines = [
     `⚠️ Jeipy AI: fallas guardando leads en Supabase (${count} en los últimos 15 minutos).`,
     `Última falla: ${failure.reason} (ref ${failure.requestId}).`,
+    failure.info ? `Diagnóstico: ${failure.info.diagnosis}` : undefined,
     failure.lead
       ? `Lead afectado: ${failure.lead.name} · ${failure.lead.phone} · ${
           failure.backup === "email" ? "llegó por correo de respaldo" : failure.backup === "webhook" ? "llegó por el webhook de respaldo" : "SIN respaldo: contáctalo directamente"
