@@ -2,7 +2,10 @@
 
 import { requireAdmin } from "@/server/admin/auth";
 import { leadsConfig } from "@/server/leads/config";
+import type { LeadSubmission } from "@/features/leads/types";
+import { buildBackupWebhookPayload } from "@/server/leads/backup";
 import { sendEmail } from "@/server/leads/notify";
+import { buildLeadRecord } from "@/server/leads/service";
 
 export type TestState = { ok?: boolean; message?: string };
 
@@ -25,21 +28,61 @@ export async function testBackupEmail(): Promise<TestState> {
   }
 }
 
-/** Envía un mensaje REAL de prueba al webhook de respaldo. */
+/**
+ * Lead ficticio con TODOS los campos que puede traer un lead real (incluidos los opcionales),
+ * para que Make detecte y mapee cada uno. Datos claramente de prueba.
+ */
+function testLeadRecord() {
+  const submission: LeadSubmission = {
+    conversationId: `prueba-webhook-${Date.now().toString(36)}`,
+    consent: true,
+    name: "PRUEBA JEIPY",
+    phone: "300 000 0000",
+    email: "prueba@example.com",
+    businessName: "NEGOCIO PRUEBA",
+    businessType: "tienda de ropa",
+    businessDescription: "PRUEBA: tienda de ropa que vende por Instagram y WhatsApp y quiere mostrar su catálogo.",
+    channels: ["whatsapp", "instagram"],
+    websiteStatus: "none",
+    goal: "clients",
+    features: ["catalog", "forms", "ai"],
+    aiInterest: true,
+    aiLevel: "basic",
+    recommendedPlan: "esencial",
+    recommendedAi: "lite",
+    budget: 2_500_000,
+    intent: "callback",
+    callbackRequested: true,
+    preferredTime: "En la tarde (prueba)",
+    preferredChannel: "whatsapp",
+    isUpdate: false,
+    backupNotified: false,
+  };
+  // Mismo armado que un lead real: estado, necesidad, resumen, reporte y fechas (createdAt, consentAt).
+  return buildLeadRecord(submission, { userAgent: "Prueba desde /admin/sistema" });
+}
+
+/**
+ * Envía al webhook de respaldo un lead ficticio con la MISMA estructura exacta que en un fallo
+ * real (`buildBackupWebhookPayload`): text, content, lead y requestId.
+ */
 export async function testBackupWebhook(): Promise<TestState> {
   await requireAdmin();
   const url = leadsConfig.backupWebhookUrl;
   if (!url) return { ok: false, message: "No configurado: falta LEADS_BACKUP_WEBHOOK_URL (o LEADS_ALERT_WEBHOOK_URL)." };
   try {
-    const text = "🧪 Prueba del webhook de respaldo de leads — Jeipy. Si ves este mensaje, el respaldo funciona.";
+    const payload = buildBackupWebhookPayload(testLeadRecord(), `PRUEBA-${crypto.randomUUID().slice(0, 8)}`);
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, content: text, test: true }),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(6_000),
     });
     if (!response.ok) return { ok: false, message: `El webhook respondió ${response.status}: ${(await response.text()).slice(0, 200)}` };
-    return { ok: true, message: "El webhook aceptó el mensaje. Confirma que apareció en el canal." };
+    return {
+      ok: true,
+      message: `El webhook aceptó el lead de prueba "PRUEBA JEIPY" (ref ${payload.requestId}) con ${Object.keys(payload.lead).length} campos en "lead". En Make, usa "Redetermine data structure" y confirma que llegó.`,
+    };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }

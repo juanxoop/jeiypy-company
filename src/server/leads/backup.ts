@@ -11,9 +11,12 @@ import { leadsConfig } from "./config";
  */
 export const isBackupWebhookConfigured = () => Boolean(leadsConfig.backupWebhookUrl);
 
-export async function sendLeadToBackupWebhook(lead: LeadRecord, requestId: string): Promise<void> {
-  const url = leadsConfig.backupWebhookUrl;
-  if (!url) throw new Error("LEADS_BACKUP_WEBHOOK_URL no está configurada.");
+/**
+ * Cuerpo exacto que recibe LEADS_BACKUP_WEBHOOK_URL: `text` (Slack), `content` (Discord),
+ * `lead` (registro completo, sin el historial de la conversación) y `requestId`.
+ * Lo usan el respaldo real y la prueba de /admin/sistema, así Make ve la misma estructura.
+ */
+export function buildBackupWebhookPayload(lead: LeadRecord, requestId: string) {
   const lines = [
     `🆘 Lead de respaldo (Supabase no disponible · ref ${requestId})`,
     `Nombre: ${lead.name}`,
@@ -30,10 +33,16 @@ export async function sendLeadToBackupWebhook(lead: LeadRecord, requestId: strin
   const text = lines.join("\n");
   const { transcript: _transcript, ...structured } = lead;
   void _transcript;
+  return { text, content: text.slice(0, 1900), lead: structured, requestId };
+}
+
+export async function sendLeadToBackupWebhook(lead: LeadRecord, requestId: string): Promise<void> {
+  const url = leadsConfig.backupWebhookUrl;
+  if (!url) throw new Error("LEADS_BACKUP_WEBHOOK_URL no está configurada.");
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, content: text.slice(0, 1900), lead: structured, requestId }),
+    body: JSON.stringify(buildBackupWebhookPayload(lead, requestId)),
     signal: AbortSignal.timeout(6_000),
   });
   if (!response.ok) throw new Error(`Webhook de respaldo ${response.status}: ${(await response.text()).slice(0, 200)}`);
