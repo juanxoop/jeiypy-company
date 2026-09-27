@@ -48,6 +48,7 @@ import {
 import { CHANNEL_LABEL, FEATURE_LABEL, GOAL_LABEL, needsLabels, presenceLabel } from "@/features/leads/labels";
 import {
   coverage,
+  nextHigherTier,
   nextLowerTier,
   tierAdds,
   tierLabel,
@@ -220,6 +221,12 @@ function question(slot: Slot, state: ConversationState): { blocks: MessageBlock[
         quickReplies: ["Sí, autorizo", "No, gracias"],
       };
     case "confirm-plan":
+      if (tierRank(slot.tier) > tierRank(slot.from)) {
+        return {
+          blocks: [text(`¿Quieres cambiar a ${tierLabel(slot.tier)}?`)],
+          quickReplies: ["Sí, me interesa", "Mantener mi plan", "¿Cuál es la diferencia?"],
+        };
+      }
       return {
         blocks: [text("¿Te interesa esta alternativa?")],
         quickReplies: ["Sí, me interesa", ...(slot.tier !== "basico" ? ["Sigue siendo alto"] : []), "¿Cuál es la diferencia?"],
@@ -682,7 +689,8 @@ function startContact(flow: "lead" | "callback", state: ConversationState, intro
  * una alternativa que ya vio en detalle, así que la tarjeta va en versión compacta.
  */
 function recommend(state: ConversationState, lead: MessageBlock[] = [], cap?: Tier, { confirmed = false } = {}): Reply {
-  const { needsHuman, intro, tier, ideal, ...card } = recommendPlan(state.profile, cap ?? state.planCap);
+  // Un tope explícito (alternativa aceptada) reemplaza cualquier elección anterior.
+  const { needsHuman, intro, tier, ideal, ...card } = recommendPlan(state.profile, cap ?? state.planCap, cap ? undefined : state.planChoice);
   const lower = nextLowerTier(state.profile, tier);
   const next: ConversationState = {
     ...state,
@@ -870,6 +878,159 @@ function entryOptions(state: ConversationState): Reply {
   };
 }
 
+/**
+ * Reconsiderar el plan ("quisiera cambiar de plan", "algo más completo", "quiero cambiar al Premium").
+ * Se conserva todo lo que el visitante ya contó; si dijo hacia dónde quiere ir, se recalcula de una vez,
+ * y si no, se pregunta qué quiere ajustar. Nunca se pasa a una persona por esto.
+ */
+function reconsiderPlan(intent: Extract<Intent, { type: "change-plan" }>, state: ConversationState): Reply {
+  const base: ConversationState = { ...state, expecting: null, retries: 0, offer: undefined };
+  const current = currentTier(base);
+
+  if (intent.aspect === "budget") {
+    return {
+      blocks: [text("Claro, lo ajustamos. ¿Cuánto tienes pensado invertir aproximadamente? Con esa cifra recalculo la recomendación.")],
+      quickReplies: ["Hasta $1.000.000", "Hasta $2.400.000", "Prefiero no decirlo"],
+      state: { ...base, expecting: { kind: "budget" }, planChoice: undefined, planCap: undefined, profile: { ...base.profile, budget: undefined } },
+    };
+  }
+  if (intent.aspect === "ai") {
+    // Se vuelve a preguntar el nivel de IA; con la respuesta se recalcula el plan.
+    const next: ConversationState = {
+      ...base,
+      planChoice: undefined,
+      planCap: undefined,
+      profile: { ...base.profile, features: { ...base.profile.features, ai: true } },
+      expecting: { kind: "aiLevel" },
+    };
+    const q = question({ kind: "aiLevel" }, next);
+    return {
+      blocks: [text("Claro, ajustemos Jeipy AI. Todo lo demás que me contaste se mantiene."), ...q.blocks],
+      quickReplies: [...(q.quickReplies ?? []), "Sin IA"],
+      state: next,
+    };
+  }
+  if (intent.aspect === "features") {
+    const f = base.profile.features;
+    const options = (["booking", "automation", "integrations", "catalog", "forms", "ai"] as Feature[]).map((key) =>
+      f[key] ? `Sin ${FEATURE_SHORT[key]}` : `Sumar ${FEATURE_SHORT[key]}`,
+    );
+    return {
+      blocks: [
+        text(
+          "Claro. ¿Qué función quieres sumar o quitar? Por ejemplo: reservas, automatizaciones, integraciones, catálogo, formularios o Jeipy AI. Con eso recalculo el plan sin perder lo demás.",
+        ),
+      ],
+      quickReplies: options.slice(0, 4),
+      state: base,
+    };
+  }
+
+  // Un plan concreto: se recalcula de inmediato y se explica qué gana o qué deja.
+  if (intent.target) {
+    if (!state.recommended) return planInfo(intent.target, base);
+    const target: Tier = intent.target === "esencial" && base.profile.features.ai ? "esencial-ai" : intent.target;
+    if (target === current && current === "esencial-ai") {
+      // El plan web ya es Esencial: lo que se puede quitar es el complemento de IA.
+      return {
+        blocks: [
+          text(
+            `Tu plan web ya es **Esencial**; lo que va aparte es **Jeipy AI Lite** (configuración desde ${getAiTier("lite").setup.price} + operación mensual). ¿Prefieres quedarte con Esencial sin la IA?`,
+          ),
+        ],
+        quickReplies: ["Sí, sin la IA", "No, déjalo así"],
+        state: base,
+      };
+    }
+    if (target === current) {
+      return {
+        blocks: [text(`Ya estamos en **${tierLabel(target)}**. Si quieres, te muestro qué cambiaría con una opción más completa o una más económica.`)],
+        quickReplies: ["Algo más completo", "Algo más económico", "Quiero avanzar"],
+        state: base,
+      };
+    }
+    return recommend({ ...base, planChoice: target, planCap: undefined });
+  }
+
+  if (!current) {
+    return startFlow("advisor", base, "Claro. Para ver qué plan te conviene, primero cuéntame un poco de tu negocio.");
+  }
+  if (intent.direction === "down") return offerCheaper(base, "price");
+  if (intent.direction === "up") return offerHigher(base, current);
+
+  return {
+    blocks: [
+      text(
+        `Claro, podemos revisarlo. Hoy te recomiendo **${tierLabel(current)}** y mantengo todo lo que me contaste. ¿Qué te gustaría ajustar?`,
+      ),
+      {
+        type: "list",
+        items: [
+          "**Bajar la inversión**: te muestro una opción más económica y qué quedaría para después.",
+          "**Algo más completo**: te muestro qué suma el siguiente nivel.",
+          "**Agregar o quitar funciones**: reservas, catálogo, automatizaciones, integraciones…",
+          "**Jeipy AI**: cambiar el nivel de IA o no incluirla.",
+        ],
+      },
+    ],
+    quickReplies: ["Bajar la inversión", "Algo más completo", "Agregar o quitar funciones", "Cambiar Jeipy AI"],
+    state: base,
+  };
+}
+
+/** "Quiero algo más completo": el siguiente nivel, qué suma y si tiene sentido con lo que contó. */
+function offerHigher(state: ConversationState, current: Tier): Reply {
+  const upper = nextHigherTier(state.profile, current);
+  if (!upper) {
+    const ai = state.recommendedAi ? getAiTier(state.recommendedAi) : undefined;
+    return {
+      blocks: [
+        text(
+          `**${tierLabel(current)}** ya es nuestro plan más completo. Encima de él se puede sumar ${
+            ai ? `un nivel mayor de Jeipy AI (hoy va con ${ai.name}; Jeipy AI Custom es para flujos e integraciones a medida)` : "Jeipy AI Pro o Jeipy AI Custom"
+          }, y el alcance final se ajusta a tu proyecto.`,
+        ),
+      ],
+      quickReplies: ["¿Qué es Jeipy AI Custom?", "Quiero avanzar", "Tengo otra duda"],
+      state,
+    };
+  }
+  const adds = tierAdds(state.profile, current, upper);
+  // Lo que el visitante pidió y solo cubre el nivel superior (p. ej. tras aceptar una alternativa).
+  const kept = new Set(coverage(state.profile, current).kept);
+  const recovers = coverage(state.profile, upper).kept.filter((need) => !kept.has(need) && coverage(state.profile, current).lost.includes(need));
+  const fit = recovers.length
+    ? `Con él recuperas ${joinNatural(recovers)}, que me dijiste que necesitabas.`
+    : "Por lo que me contaste, hoy no pediste esas funciones; tiene sentido si piensas sumarlas pronto.";
+  const liteTip =
+    upper === "premium" && current === "esencial" && !state.profile.features.ai
+      ? " Y si lo que buscas es una IA que responda dudas, Jeipy AI Lite se suma a Esencial sin cambiar de plan."
+      : "";
+  const rec = recommendPlan(state.profile, undefined, upper);
+  const card: RecommendationBlock = {
+    type: "recommendation",
+    variant: "recommended",
+    planId: rec.planId,
+    aiTier: rec.aiTier,
+    title: "Opción más completa",
+    tagline: rec.tagline,
+    because: rec.because,
+    highlights: rec.highlights,
+    budget: rec.budget,
+    notes: rec.notes,
+    alternative: rec.alternative,
+  };
+  card.actions = [
+    { label: "Me interesa esta opción", message: "Sí, me interesa", primary: true },
+    { label: `Mantener ${tierLabel(current)}`, message: "Mantener mi plan" },
+  ];
+  return {
+    blocks: [text(`Claro. El siguiente nivel es **${tierLabel(upper)}** (${tierPriceText(upper)}): suma ${joinNatural(adds)}. ${fit}${liteTip}`), card],
+    quickReplies: ["¿Cuál es la diferencia?"],
+    state: { ...state, expecting: { kind: "confirm-plan", tier: upper, from: current }, comparePair: [upper, current], retries: 0 },
+  };
+}
+
 /** Comparación en contexto: "¿cuál es la diferencia entre esos dos?". */
 function compareTiers(state: ConversationState, pair: [Tier, Tier]): MessageBlock[] {
   const [hi, lo] = tierRank(pair[0]) >= tierRank(pair[1]) ? pair : [pair[1], pair[0]];
@@ -897,6 +1058,7 @@ function applyBudget(state: ConversationState, amount: number, input = ""): Repl
     ...state,
     expecting: null,
     planCap: undefined,
+    planChoice: undefined,
     profile: { ...enrichProfile(state.profile, input), budget: { amount } },
   };
   const ready = next.recommended || !nextSlot({ ...next, flow: "advisor" });
@@ -923,7 +1085,9 @@ function applyBudget(state: ConversationState, amount: number, input = ""): Repl
 }
 
 /** Tras un cambio en el perfil: recomienda de nuevo si ya había recomendación, o sigue el diagnóstico. */
-function continueWith(state: ConversationState, lead: MessageBlock[]): Reply {
+function continueWith(current: ConversationState, lead: MessageBlock[]): Reply {
+  // Cambiaron sus necesidades: el plan se recalcula con ellas (una elección anterior deja de mandar).
+  const state: ConversationState = { ...current, planChoice: undefined };
   if (state.recommended) {
     const before = tierOf(state.recommended, state.recommendedAi);
     const reply = recommend(state, lead);
@@ -1014,7 +1178,9 @@ function explainAgain(state: ConversationState): Reply {
       return {
         blocks: [
           text(
-            `En simple: **${tierLabel(slot.tier)}** cuesta menos que **${tierLabel(slot.from)}**, pero trae menos funciones. Te lo muestro lado a lado:`,
+            tierRank(slot.tier) > tierRank(slot.from)
+              ? `En simple: **${tierLabel(slot.tier)}** cuesta más que **${tierLabel(slot.from)}**, pero suma más funciones. Te lo muestro lado a lado:`
+              : `En simple: **${tierLabel(slot.tier)}** cuesta menos que **${tierLabel(slot.from)}**, pero trae menos funciones. Te lo muestro lado a lado:`,
           ),
           ...compareTiers(state, [slot.from, slot.tier]),
           ...question(slot, state).blocks,
@@ -1456,15 +1622,19 @@ function respondTo(input: string, current: ConversationState): Reply {
     // Datos de contacto: una duda o una pausa ("bro tengo una duda más", "antes de eso…") se atiende
     // primero; el dato pendiente espera. Nunca se responde "número inválido" a una pregunta.
     if (CONTACT_SLOTS.has(slot.kind)) {
+      // Reconsiderar el plan mientras deja sus datos: se atiende primero; lo que ya dio se conserva.
+      if (intent?.type === "change-plan") return reconsiderPlan(intent, { ...current, flow: "free" });
       const aside = handleAside(input, current, slot);
       if (aside) return aside;
     }
 
     if (slot.kind === "confirm-plan") {
       const base: ConversationState = { ...current, expecting: null };
+      const upward = tierRank(slot.tier) > tierRank(slot.from);
+      if (intent?.type === "change-plan") return reconsiderPlan(intent, base);
       // "Sigue siendo alto": un peldaño más abajo, siempre explicando qué se pierde.
       if (intent?.type === "objection-price" || intent?.type === "objection-scope" || t.includes(" sigue siendo")) {
-        return offerCheaper(base, intent?.type === "objection-scope" ? "scope" : "price", slot.tier);
+        return offerCheaper(base, intent?.type === "objection-scope" ? "scope" : "price", upward ? undefined : slot.tier);
       }
       if (intent?.type === "budget") return applyBudget(base, intent.amount);
       if (intent?.type === "not-understood") return explainAgain(current);
@@ -1473,8 +1643,13 @@ function respondTo(input: string, current: ConversationState): Reply {
         return { blocks: [...compareTiers(current, [slot.from, slot.tier]), ...q.blocks], quickReplies: q.quickReplies, state: current };
       }
       const answer = parseYesNo(input) ?? (t.includes(" me interesa") || t.includes(" me sirve") || t.includes(" ver ") ? "yes" : undefined);
+      if (answer === "yes" && upward) {
+        return recommend({ ...base, planChoice: slot.tier, planCap: undefined }, [text(`Perfecto, cambiamos a ${tierLabel(slot.tier)}. Así quedaría:`)], undefined, {
+          confirmed: true,
+        });
+      }
       if (answer === "yes") {
-        return recommend({ ...base, planCap: slot.tier }, [text("Perfecto, ajustemos la propuesta. Así quedaría:")], slot.tier, { confirmed: true });
+        return recommend({ ...base, planCap: slot.tier, planChoice: undefined }, [text("Perfecto, ajustemos la propuesta. Así quedaría:")], slot.tier, { confirmed: true });
       }
       if (answer === "later") {
         // "Déjame pensarlo", "no sé todavía": sin presión; la alternativa queda disponible.
@@ -1567,7 +1742,7 @@ function respondTo(input: string, current: ConversationState): Reply {
     // Una duda, objeción o petición en medio del diagnóstico: se atiende y se retoma.
     if (intent && !["quote", "recommend", "digitalize", "which-best", "unsure"].includes(intent.type)) {
       if (intent.type === "ai-tier" && intent.wants) return startAiTierFlow(intent.tier, { ...current, expecting: null });
-      if (["human", "lead", "objection-price", "objection-scope", "advance", "callback", "restart"].includes(intent.type)) {
+      if (["human", "lead", "objection-price", "objection-scope", "advance", "callback", "restart", "change-plan"].includes(intent.type)) {
         return respond(input, { ...current, expecting: null });
       }
       const answer = answerIntent(intent, current);
@@ -1668,6 +1843,7 @@ function respondTo(input: string, current: ConversationState): Reply {
     return startFlow("quote", { ...current, profile: enrichProfile(current.profile, input) }, "¡Genial! Antes de preparar la propuesta, entendamos bien tu proyecto.");
   }
   // Objeciones y cambios de opinión: primero se intenta una alternativa viable, no el traspaso.
+  if (intent?.type === "change-plan") return reconsiderPlan(intent, current);
   if (intent?.type === "budget") return applyBudget(current, intent.amount, input);
   if (intent?.type === "objection-price" || intent?.type === "objection-scope") {
     return offerCheaper(

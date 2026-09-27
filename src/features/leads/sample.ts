@@ -99,9 +99,9 @@ export function emojiBoundaryMessage(): string {
   return `${text.slice(0, 279)}🚀✨ gracias!`;
 }
 
-/** Conversaciones representativas del flujo actual (Recommendation Card, alternativa, llamada, emojis). */
+/** Conversaciones representativas del flujo actual (Recommendation Card, alternativa, cambio de plan, llamada, emojis). */
 export function samplePayloads(tag = TEST_MARKER): { name: string; payload: LeadPayload }[] {
-  const contact = (n: number): Contact => ({ name: `Prueba Automatica ${["Uno", "Dos", "Tres", "Cuatro"][n]}`, phone: `300 000 000${n}`, businessName: `${tag} ${n + 1}` });
+  const contact = (n: number): Contact => ({ name: `Prueba Automatica ${["Uno", "Dos", "Tres", "Cuatro", "Cinco"][n]}`, phone: `300 000 000${n}`, businessName: `${tag} ${n + 1}` });
   return [
     {
       name: "Recommendation Card → Quiero este plan",
@@ -121,6 +121,13 @@ export function samplePayloads(tag = TEST_MARKER): { name: string; payload: Lead
     {
       name: "Mensaje largo con emojis (recorte en medio de un emoji)",
       payload: payloadFromConversation([emojiBoundaryMessage()], contact(3)),
+    },
+    {
+      name: "Cambio de plan tras la recomendación → Premium → Quiero este plan",
+      payload: payloadFromConversation(
+        ["Tengo una tienda de ropa, uso Instagram y TikTok y quiero más ventas.", "Sí", "No", "quisiera cambiar de plan", "Quiero cambiar al Premium", "Quiero este plan"],
+        contact(4),
+      ),
     },
   ];
 }

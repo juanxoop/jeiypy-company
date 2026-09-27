@@ -4,7 +4,9 @@
  *
  *   npm run test:conversation
  */
-import { respond } from "@/features/assistant/engine";
+import { buildLeadDraft, respond } from "@/features/assistant/engine";
+import { interpretReply } from "@/features/assistant/interpret";
+import { detectIntent } from "@/features/assistant/nlu";
 import { initialConversationState, type ConversationState, type MessageBlock, type RecommendationBlock } from "@/features/assistant/types";
 
 let failures = 0;
@@ -156,6 +158,87 @@ console.log("\nExtras) Pausas y lenguaje informal a mitad del diagnóstico");
   check(cardOf(chevere.last.blocks)?.variant === "alternative", "\"está chévere pero no me alcanza\" → alternativa");
   const bro = talk(["bro tengo una tienda de ropa y vendo por insta", "de una"]);
   check(bro.state.profile.features.catalog === true && !ROBOTIC.test(bro.reply), "\"bro … insta\" + \"de una\" se entienden");
+}
+
+
+console.log("\nM) Reconsiderar el plan tras la recomendación (PLAN_RECONSIDERATION)");
+{
+  // Tienda de ropa con catálogo, ventas, Jeipy AI Lite y $3.000.000 → Esencial + Jeipy AI Lite.
+  const rec = talk(["Tengo una tienda de ropa", "Vendo por Instagram y WhatsApp", "No tengo página", "Quiero vender online", "sí", "Solo responder dudas y captar datos", "Tengo 3000000"]);
+  check(rec.state.recommended === "esencial" && rec.state.recommendedAi === "lite", "Punto de partida: Esencial + Jeipy AI Lite", `${rec.state.recommended}+${rec.state.recommendedAi}`);
+  const profileBefore = JSON.stringify(rec.state.profile);
+  const HANDOFF = /no lo tengo confirmado|prefiero no inventarlo/i;
+
+  for (const phrase of ["quisiera cambiar de plan", "cambiar de plan", "quiero otro plan", "ese plan no me convence", "no me convence", "¿podemos revisar el plan?"]) {
+    const r = talk([phrase], rec.state);
+    const handoff = r.last.blocks.some((b) => b.type === "closing" || b.type === "contact-links");
+    check(
+      /podemos revisarlo/i.test(r.reply) && /Bajar la inversión/.test(r.reply) && !HANDOFF.test(r.reply) && !handoff,
+      `"${phrase}" → pregunta qué ajustar, sin "no lo tengo confirmado" ni pasar a humano`,
+      r.reply.slice(0, 90),
+    );
+    check(
+      JSON.stringify(r.state.profile) === profileBefore && r.state.recommended === "esencial" && r.state.conversationId === rec.state.conversationId,
+      `"${phrase}" → conserva perfil, presupuesto, canales y conversación`,
+    );
+    check(interpretReply(phrase, { ...rec.state, expecting: { kind: "aiLevel" } }).kind === "plan_reconsideration", `"${phrase}" se interpreta como plan_reconsideration`);
+  }
+
+  const cheaper = talk(["quiero algo más barato"], rec.state);
+  const alt = cardOf(cheaper.last.blocks);
+  check(alt?.variant === "alternative" && alt.planId === "esencial" && !alt.aiTier, "\"algo más barato\" → alternativa inferior (Esencial sin IA)", alt?.planId);
+  check(Boolean(alt?.later?.some((l) => /Jeipy AI Lite/.test(l))), "Explica qué queda fuera", alt?.later?.join(", "));
+
+  const up = talk(["quiero algo más completo"], rec.state);
+  const upCard = cardOf(up.last.blocks);
+  check(upCard?.planId === "premium" && /suma automatización/.test(up.reply), "\"algo más completo\" → Premium y qué añade", up.reply.slice(0, 120));
+  check(/hoy no pediste esas funciones/.test(up.reply), "Es honesto: dice que hoy no pidió esas funciones");
+  check(upCard?.budget?.fits === false, "Avisa que Premium supera el presupuesto dicho", upCard?.budget?.text);
+  check(up.state.expecting?.kind === "confirm-plan" && up.state.recommended === "esencial", "No cambia hasta que confirme");
+  const upYes = talk(["Sí, me interesa"], up.state);
+  check(upYes.state.recommended === "premium" && upYes.state.planChoice === "premium", "Al confirmar, el estado queda en Premium");
+  const keep = talk(["Mantener mi plan"], up.state);
+  check(keep.state.recommended === "esencial" && /mantenemos Esencial \+ Jeipy AI Lite/.test(keep.reply), "\"Mantener mi plan\" deja todo igual");
+
+  const toPremium = talk(["Quiero cambiar al Premium"], rec.state);
+  check(toPremium.state.recommended === "premium" && cardOf(toPremium.last.blocks)?.planId === "premium", "\"Quiero cambiar al Premium\" → recalcula de inmediato");
+  check(/Frente a Esencial \+ Jeipy AI Lite suma/.test(toPremium.reply) && /hoy no lo necesitas/.test(toPremium.reply), "Explica qué suma y si tiene sentido con sus necesidades", toPremium.reply.slice(0, 120));
+  check(JSON.stringify(toPremium.state.profile) === profileBefore, "Conserva todo lo que contó");
+  const vamos = talk(["vamos con el premium"], rec.state);
+  check(vamos.state.recommended === "premium", "\"vamos con el premium\" también cambia de plan (no avanza con el anterior)");
+
+  // Guardado de la conversación (sessionStorage): el cambio sobrevive a serializar el estado.
+  const restored = JSON.parse(JSON.stringify(toPremium.state)) as ConversationState;
+  const advance = talk(["Quiero este plan", "Juan Pérez", "3001234567", "Omitir"], restored);
+  check(/propuesta de Premium/.test(talk(["Quiero este plan"], restored).reply), "Tras restaurar la conversación, avanza con Premium");
+  const draft = buildLeadDraft(advance.state);
+  check(draft.recommendedPlan === "premium" && draft.name === "Juan Pérez" && draft.budget === 3_000_000, "El lead para el CRM lleva Premium, nombre y presupuesto", `${draft.recommendedPlan} · ${draft.budget}`);
+
+  const objection = talk(["Quiero cambiar al Premium", "es muy caro"], rec.state);
+  check(cardOf(objection.last.blocks)?.variant === "alternative" && cardOf(objection.last.blocks)?.planId === "esencial", "Objeción de precio tras elegir Premium → alternativa más económica");
+  const budgetAfter = talk(["Quiero cambiar al Premium", "Tengo 2500000"], rec.state);
+  check(budgetAfter.state.planChoice === undefined && budgetAfter.state.recommended === "esencial", "Un presupuesto nuevo recalcula (la elección anterior deja de mandar)");
+
+  // Bajar desde Premium: dice qué se pierde.
+  const premium = talk(["Tengo una barbería y quiero reservas desde la página", "Solo Instagram", "Conseguir más clientes", "Sí", "No"]);
+  const down = talk(["quiero cambiar al esencial"], premium.state);
+  const downCard = cardOf(down.last.blocks);
+  check(down.state.recommended === "esencial" && /quedan por fuera/.test(down.reply) && Boolean(downCard?.later?.some((l) => /reservas/i.test(l))), "Bajar a Esencial explica que las reservas quedan fuera", down.reply.slice(0, 120));
+  check(Boolean(downCard?.meanwhile?.length), "Y cómo se resuelve mientras tanto (WhatsApp/formulario)");
+  const top = talk(["quiero algo más completo"], premium.state);
+  check(/ya es nuestro plan más completo/.test(top.reply) && top.state.recommended === "premium", "Desde Premium: dice que es el más completo, sin inventar otro plan");
+
+  // Mientras deja sus datos.
+  const contact = talk(["Quiero este plan", "Laura Gómez", "quisiera cambiar de plan"], rec.state);
+  check(/podemos revisarlo/.test(contact.reply) && contact.state.profile.name === "Laura Gómez" && contact.state.expecting === null, "Durante la captura de datos: atiende el cambio y conserva lo que ya dio");
+
+  // Sin falsos positivos.
+  check(detectIntent("¿cuál es el mejor plan?")?.type === "which-best", "\"¿cuál es el mejor plan?\" sigue siendo una consulta, no un cambio");
+  check(detectIntent("quiero algo más barato")?.type === "objection-price", "\"quiero algo más barato\" sigue siendo objeción de precio");
+  const web = talk(["Tengo una peluquería", "Mi página web no me convence"]);
+  check(web.state.profile.websiteStatus === "needs_improvement" && web.state.recommended === undefined, "\"mi página web no me convence\" es un dato de la web, no un cambio de plan");
+  const noRec = talk(["cambiar de plan"]);
+  check(noRec.state.flow === "advisor" && !HANDOFF.test(noRec.reply), "Sin recomendación todavía: empieza el diagnóstico");
 }
 
 console.log(failures ? `\n✗ ${failures} comprobaciones fallaron` : "\n✓ Todo correcto");

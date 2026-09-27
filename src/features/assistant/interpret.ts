@@ -11,6 +11,7 @@
  * - clarification_request: no entendió lo que se le preguntó ("¿cómo así?").
  * - commercial_intent: quiere avanzar, que lo llamen o hablar con alguien.
  * - need_change: suma o descarta una función ("no quiero catálogo, quiero reservas").
+ * - plan_reconsideration: quiere revisar o cambiar el plan ("cambiar de plan", "algo más completo").
  * - unknown: nada interpretable.
  */
 import { budgetCorrection, detectIntent, enrichProfile, extractFeatures, hasCorrectionMarker, isQuestion, wantsToAsk } from "./nlu";
@@ -29,6 +30,7 @@ export type ReplyKind =
   | "clarification_request"
   | "commercial_intent"
   | "need_change"
+  | "plan_reconsideration"
   | "unknown";
 
 export type Interpretation = {
@@ -56,6 +58,7 @@ export function interpretReply(raw: string, state: ConversationState): Interpret
 
   let kind: ReplyKind;
   if (intent?.type === "not-understood") kind = "clarification_request";
+  else if (intent?.type === "change-plan") kind = "plan_reconsideration";
   else if (intent && ["advance", "lead", "callback", "human", "quote"].includes(intent.type)) kind = "commercial_intent";
   else if (intent?.type === "objection-price" || budgetChange === "lower" || (intent?.type === "objection-scope" && !answeringFeature)) kind = "budget_objection";
   else if (hasCorrectionMarker(raw)) kind = "correction";

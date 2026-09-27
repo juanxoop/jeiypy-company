@@ -25,6 +25,11 @@ export function isQuestion(raw: string): boolean {
 export type Intent =
   /** El visitante dio una cifra de presupuesto ("tengo 700 mil", "máximo un millón"). */
   | { type: "budget"; amount: number }
+  /**
+   * Reconsiderar el plan recomendado ("quisiera cambiar de plan", "quiero algo más completo",
+   * "quiero cambiar al Premium"). `direction`: subir o bajar; `target`: el plan que nombró.
+   */
+  | { type: "change-plan"; direction?: "up" | "down"; target?: PlanId; aspect?: "ai" | "features" | "budget" }
   /** Descarta funciones ("no quiero reservas", "sin IA"). */
   | { type: "drop-feature"; features: Feature[] }
   /** "No necesito todo eso", "prefiero comenzar pequeño". */
@@ -71,7 +76,7 @@ const PLAN_WORDS: Record<PlanId, string> = { basico: " basico", esencial: " esen
 /** Intenciones que nunca son el nombre de un negocio ("me parece caro", "¿y la mensualidad?"). */
 const CONVERSATIONAL_INTENTS = new Set<string>([
   "human", "lead", "objection-price", "think-later", "guarantee", "unsure", "which-best",
-  "ai-monthly", "ai-pricing", "ai-tier", "prices", "compare", "thanks", "restart", "callback",
+  "ai-monthly", "ai-pricing", "ai-tier", "prices", "compare", "thanks", "restart", "callback", "change-plan",
 ]);
 
 /** "Jeipy AI Lite" → "lite". Pro solo cuenta junto a "ai"/"ia"/"jeipy" para no confundirlo con otras palabras. */
@@ -89,6 +94,67 @@ export function mentionedPlans(t: string): PlanId[] {
 
 /** Palabras que niegan lo que viene después ("no quiero", "sin", "tampoco", "ni"). */
 const NEGATION = / (no|sin|nada de|tampoco|ni) /;
+
+const PRICE_OBJECTION = [
+  " caro", " costoso", " muy alto", " sigue siendo alto", " no me alcanza", " no tengo tanto", " sale mucho",
+  " mucha plata", " mucho dinero", " fuera de mi presupuesto", " fuera del presupuesto", " sale de mi presupuesto",
+  " se sale de mi", " pasa de mi presupuesto", " mas barato", " mas barata", " economico", " economica", " no puedo pagar",
+  " no puedo invertir", " no me da el presupuesto", " menos plata", " menos dinero", " mas bajo", " rebaja", " descuento",
+  " poco presupuesto", " presupuesto bajo", " presupuesto limitado", " presupuesto corto", " presupuesto ajustado",
+  " presupuesto apretado", " no tengo mucho presupuesto", " no tengo mucha plata", " estoy corto de", " ando corto",
+];
+
+/** Pedir otro plan sin decir hacia dónde ("cambiar de plan", "ese plan no me convence"). */
+const CHANGE_PLAN = [
+  " cambiar de plan", " cambiar el plan", " cambiar mi plan", " cambiar plan", " cambiarme de plan", " cambio de plan",
+  " cambiemos de plan", " cambiemos el plan", " otro plan", " otra opcion", " otras opciones", " otra alternativa",
+  " revisar el plan", " revisar la recomendacion", " revisemos el plan", " ajustar el plan", " modificar el plan",
+  " reconsiderar", " replantear", " no me convence el plan", " no me convence ese", " no me convence esa",
+  " no me convence la recomendacion", " plan no me convence", " opcion no me convence", " recomendacion no me convence",
+  " no me gusta ese plan", " no me gusta el plan", " no me gusta esa opcion", " no me gusta la recomendacion",
+  " prefiero otro", " prefiero otra", " algo diferente", " algo distinto",
+];
+/** Subir de nivel. */
+const PLAN_UP = [
+  " mas completo", " mas completa", " mas avanzado", " mas avanzada", " mas robusto", " mas robusta", " mas funciones",
+  " algo mejor", " plan superior", " plan mas alto", " plan mas grande", " subir de plan", " subir el plan", " subir de nivel",
+  " siguiente plan", " plan mayor", " un nivel mas",
+];
+/** Bajar de nivel (además de las objeciones de precio). */
+const PLAN_DOWN = [
+  " bajar de plan", " bajar el plan", " bajar de nivel", " plan inferior", " plan mas bajo", " plan menor",
+  " bajar la inversion", " bajar el presupuesto", " invertir menos", " menos inversion", " algo menor",
+];
+/** "Quiero cambiar al Premium", "mejor el Esencial", "me quedo con el Básico". */
+const TO_PLAN =
+  / (cambiar|cambiarme|cambio|cambiemos|pasar|pasarme|pasemos|subir|subirme|bajar|bajarme|prefiero|mejor|quiero|quisiera|me quedo con|elijo|escojo|me voy por|vamos con|voy con) (a |al |a el |por |con |de )?(el |la |plan )?(plan )?(basico|esencial|premium) /;
+/** Hablar de la web actual ("mi página no me convence") no es reconsiderar el plan. */
+const ABOUT_CURRENT_SITE = [" pagina", " web ", " sitio", " instagram", " facebook", " tienda "];
+
+/**
+ * Reconsiderar el plan recomendado. Solo cuenta si hay una marca de cambio ("cambiar", "otro plan",
+ * "más completo", "al Premium"): "más barato" a secas sigue siendo una objeción de precio.
+ */
+export function detectPlanChange(t: string): Extract<Intent, { type: "change-plan" }> | null {
+  // Qué quiere ajustar, cuando lo dice ("cambiar Jeipy AI", "agregar o quitar funciones").
+  if (has(t, " cambiar jeipy ai", " cambiar la ia", " cambiar el nivel de ia", " cambiar el nivel de jeipy", " otro nivel de jeipy", " otro nivel de ia"))
+    return { type: "change-plan", aspect: "ai" };
+  if (has(t, " agregar o quitar funciones", " cambiar funciones", " cambiar las funciones", " ajustar funciones", " ajustar las funciones"))
+    return { type: "change-plan", aspect: "features" };
+  if (has(t, " ajustar el presupuesto", " ajustar presupuesto", " cambiar el presupuesto", " cambiar mi presupuesto"))
+    return { type: "change-plan", aspect: "budget" };
+  const target = TO_PLAN.exec(t)?.[5] as PlanId | undefined;
+  if (target && !has(t, " que incluye", " cuanto", " diferencia")) return { type: "change-plan", target };
+  const up = has(t, ...PLAN_UP);
+  const down = has(t, ...PLAN_DOWN);
+  const bareDoubt = t === " no me convence " || t === " eso no me convence " || t === " no me termina de convencer ";
+  const generic = has(t, ...CHANGE_PLAN) || bareDoubt;
+  if (!up && !down && !generic) return null;
+  if (!generic && !down && has(t, ...ABOUT_CURRENT_SITE)) return null;
+  if (down || (generic && has(t, ...PRICE_OBJECTION))) return { type: "change-plan", direction: "down" };
+  if (up) return { type: "change-plan", direction: "up" };
+  return { type: "change-plan" };
+}
 
 /** Detecta la intención principal. El orden define la prioridad. */
 export function detectIntent(raw: string): Intent | null {
@@ -132,21 +198,13 @@ export function detectIntent(raw: string): Intent | null {
     return { type: "ai-tier", tier, wants };
   }
 
+  const change = detectPlanChange(t);
+  if (change) return change;
+
   if (has(t, " quiero avanzar", " quiero contratar", " quiero empezar", " quiero arrancar", " empecemos", " vamos con", " lo quiero", " me lo llevo", " quiero ese plan", " quiero este plan"))
     return { type: "advance" };
 
-  if (
-    has(
-      t,
-      " caro", " costoso", " muy alto", " sigue siendo alto", " no me alcanza", " no tengo tanto", " sale mucho",
-      " mucha plata", " mucho dinero", " fuera de mi presupuesto", " fuera del presupuesto", " sale de mi presupuesto",
-      " se sale de mi", " pasa de mi presupuesto", " mas barato", " mas barata", " economico", " economica", " no puedo pagar",
-      " no puedo invertir", " no me da el presupuesto", " menos plata", " menos dinero", " mas bajo", " rebaja", " descuento",
-      " poco presupuesto", " presupuesto bajo", " presupuesto limitado", " presupuesto corto", " presupuesto ajustado",
-      " presupuesto apretado", " no tengo mucho presupuesto", " no tengo mucha plata", " estoy corto de", " ando corto",
-    )
-  )
-    return { type: "objection-price" };
+  if (has(t, ...PRICE_OBJECTION)) return { type: "objection-price" };
   if (
     has(
       t, " no necesito todo eso", " no necesito tanto", " es demasiado", " demasiadas cosas", " algo mas sencillo", " algo mas simple",

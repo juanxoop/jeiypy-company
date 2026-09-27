@@ -25,6 +25,7 @@ import {
   budgetAmount,
   coverage,
   minTier,
+  tierAdds,
   tierCost,
   tierLabel,
   tierPlan,
@@ -236,12 +237,13 @@ export function aiCostNote(id: AiTierId): string {
 
 const firstUpper = (items: string[]) => items.map(cap);
 
-export function recommendPlan(profile: Profile, capTier?: Tier): Recommendation {
+export function recommendPlan(profile: Profile, capTier?: Tier, choice?: Tier): Recommendation {
   const ideal = pickTier(profile);
   const budget = budgetAmount(profile);
-  let tier = pickTier(profile, capTier);
+  // Un nivel elegido por el visitante se respeta aunque no sea el ideal: se explica, no se corrige solo.
+  let tier = choice ?? pickTier(profile, capTier);
   let budgetGap = false;
-  if (budget !== undefined) {
+  if (budget !== undefined && !choice) {
     const fit = affordableTier(profile, budget, tier);
     if (fit) tier = fit;
     else {
@@ -268,7 +270,9 @@ export function recommendPlan(profile: Profile, capTier?: Tier): Recommendation 
   let later: string[] | undefined;
   let meanwhile: string[] | undefined;
 
-  if (budgetGap) {
+  if (choice) {
+    ({ intro, title, keeps, later, meanwhile, alternative } = chosenPlanText(profile, choice, ideal));
+  } else if (budgetGap) {
     // Nunca se presenta Básico como solución completa si lo que pidió necesita más.
     const cov = coverage(profile, "basico");
     const needsMore = ideal !== "basico" && cov.lost.length > 0;
@@ -326,7 +330,11 @@ export function recommendPlan(profile: Profile, capTier?: Tier): Recommendation 
     notes.push(`Con tu presupuesto, ${deferred.name} (configuración desde ${deferred.setup.price}) puede sumarse en una segunda etapa.`);
   }
   const budgetInfo: RecommendationBlock["budget"] =
-    budget === undefined || budgetGap
+    choice && budget !== undefined
+      ? tierCost(tier) <= budget
+        ? { fits: true, text: `Entra en tu presupuesto de ${formatCop(budget)}${aiTier ? " (la mensualidad de Jeipy AI va aparte)" : ""}` }
+        : { fits: false, text: `Está por encima de tu presupuesto de ${formatCop(budget)}` }
+      : budget === undefined || budgetGap
       ? undefined
       : downgraded
         ? { fits: true, text: `Ajustado a tu presupuesto de ${formatCop(budget)}` }
@@ -353,6 +361,45 @@ export function recommendPlan(profile: Profile, capTier?: Tier): Recommendation 
     needsHuman: budgetGap,
     tier,
     ideal,
+  };
+}
+
+/**
+ * Plan elegido por el visitante al reconsiderar: qué gana o qué deja frente al que más sentido tenía
+ * según lo que contó. Nunca promete una función que el plan no incluye.
+ */
+function chosenPlanText(profile: Profile, choice: Tier, ideal: Tier) {
+  const label = tierLabel(choice);
+  const base = { title: "Plan elegido" } as {
+    intro: string;
+    title: string;
+    keeps?: string[];
+    later?: string[];
+    meanwhile?: string[];
+    alternative?: string;
+  };
+  if (choice === ideal) {
+    return { ...base, intro: `Listo, queda **${label}**. Además, es el que mejor encaja con lo que me contaste:` };
+  }
+  if (tierRank(choice) < tierRank(ideal)) {
+    const cov = coverage(profile, choice);
+    return {
+      ...base,
+      intro: cov.lost.length
+        ? `Listo, cambiamos a **${label}**. Te soy transparente: con este plan quedan por fuera ${joinNatural(cov.lost)}, que sí incluye **${tierLabel(ideal)}**. Así quedaría:`
+        : `Listo, cambiamos a **${label}**. Cubre lo que me contaste con una inversión menor. Así quedaría:`,
+      keeps: firstUpper(cov.kept),
+      later: cov.lost.length ? firstUpper(cov.lost) : undefined,
+      meanwhile: cov.workarounds.length ? cov.workarounds : undefined,
+      alternative: `Si más adelante lo necesitas, puedes pasar a ${tierLabel(ideal)} por etapas.`,
+    };
+  }
+  // Por encima de lo que necesita: se dice qué suma y que hoy no lo pidió.
+  const adds = tierAdds(profile, ideal, choice);
+  return {
+    ...base,
+    intro: `Listo, cambiamos a **${label}**. Frente a ${tierLabel(ideal)} suma ${joinNatural(adds)}. Por lo que me contaste, hoy no lo necesitas, pero tiene sentido si piensas crecer en esa dirección pronto. Así quedaría:`,
+    alternative: `Si al final no vas a usar esas funciones, ${tierLabel(ideal)} cubre lo que me contaste con una inversión menor.`,
   };
 }
 

@@ -208,6 +208,11 @@ export function nextLowerTier(profile: Profile, from: Tier): Tier | undefined {
     .pop();
 }
 
+/** Siguiente peldaño hacia arriba, o nada si ya está en Premium. */
+export function nextHigherTier(profile: Profile, from: Tier): Tier | undefined {
+  return relevantTiers(profile).find((t) => tierRank(t) > tierRank(from));
+}
+
 /** Nivel más alto (sin pasar del ideal) que entra en el presupuesto, o nada si ninguno alcanza. */
 export function affordableTier(profile: Profile, budget: number, ideal: Tier): Tier | undefined {
   return relevantTiers(profile)

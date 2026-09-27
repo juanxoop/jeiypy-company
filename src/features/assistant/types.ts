@@ -113,6 +113,12 @@ export type ConversationState = {
   recommendedAi?: AiTierId;
   /** Nivel máximo que el visitante aceptó tras una objeción: las siguientes recomendaciones lo respetan. */
   planCap?: Tier;
+  /**
+   * Nivel que el visitante eligió de forma explícita al reconsiderar el plan ("quiero cambiar al Premium"),
+   * aunque no sea el ideal según sus necesidades. Manda sobre el cálculo hasta que cambien sus necesidades
+   * o su presupuesto.
+   */
+  planChoice?: Tier;
   /** Los dos niveles de los que se está hablando, para entender "¿y la diferencia entre esos dos?". */
   comparePair?: [Tier, Tier];
   /** El cliente ya vio las opciones de contacto (se ofrecen una sola vez al cerrar la cotización). */
