@@ -133,8 +133,9 @@ export function DegradedPanel({ onClose }: { onClose: () => void }) {
       role="dialog"
       aria-label="Contacto con Jeipy"
       className={cn(
-        "fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-ink",
-        "sm:inset-auto sm:right-6 sm:bottom-24 sm:max-h-[min(40rem,calc(100dvh-8rem))] sm:w-[25rem] sm:rounded-3xl sm:border sm:border-line-strong sm:bg-[linear-gradient(180deg,#0b1222,#070a11_40%)]",
+        "fixed inset-x-2 top-[max(3.75rem,calc(env(safe-area-inset-top)+2.5rem))] bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] z-[60] flex flex-col overflow-y-auto",
+        "rounded-[1.75rem] border border-line-strong bg-[linear-gradient(180deg,#0b1222,#070a11_40%)]",
+        "sm:inset-auto sm:right-6 sm:bottom-24 sm:max-h-[min(40rem,calc(100dvh-8rem))] sm:w-[25rem] sm:rounded-3xl",
       )}
     >
       <header className="flex items-center gap-3 border-b border-line px-4 py-3.5">

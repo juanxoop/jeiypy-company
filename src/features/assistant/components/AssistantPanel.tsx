@@ -77,15 +77,18 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
       transition={{ duration: 0.4, ease: easeJeipy }}
       style={{ transformOrigin: "bottom right" }}
       className={cn(
-        "fixed inset-0 z-[60] flex flex-col overflow-hidden bg-ink",
-        "sm:inset-auto sm:right-6 sm:bottom-24 sm:h-[min(40rem,calc(100dvh-8rem))] sm:w-[25rem] sm:rounded-3xl sm:border sm:border-line-strong",
-        "sm:bg-[linear-gradient(180deg,#0b1222,#070a11_40%)] sm:shadow-[0_40px_120px_-30px_rgb(0_0_0/0.9),0_0_0_1px_rgb(0_0_0/0.4),0_20px_60px_-30px_rgb(23_105_255/0.45)]",
+        // Móvil: panel flotante que deja ver un poco la página (margen de 8 px y respiro arriba),
+        // respetando las safe areas del iPhone. La conversación hace scroll por dentro.
+        "fixed inset-x-2 top-[max(3.75rem,calc(env(safe-area-inset-top)+2.5rem))] bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] z-[60] flex flex-col overflow-hidden",
+        "rounded-[1.75rem] border border-line-strong",
+        "sm:inset-auto sm:right-6 sm:bottom-24 sm:h-[min(40rem,calc(100dvh-8rem))] sm:w-[25rem] sm:rounded-3xl",
+        "bg-[linear-gradient(180deg,#0b1222,#070a11_40%)] shadow-[0_40px_120px_-30px_rgb(0_0_0/0.9),0_0_0_1px_rgb(0_0_0/0.4),0_20px_60px_-30px_rgb(23_105_255/0.45)]",
       )}
     >
       {/* Cabecera */}
-      <header className="relative flex items-center gap-3 border-b border-line px-4 py-3.5 pt-[max(0.875rem,env(safe-area-inset-top))]">
+      <header className="relative flex items-center gap-3 border-b border-line px-3.5 py-3 sm:px-4 sm:py-3.5">
         <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-20 h-40 bg-[radial-gradient(closest-side,rgb(23_105_255/0.25),transparent)]" />
-        <AssistantOrb state={thinking ? "thinking" : "idle"} className="relative size-10" />
+        <AssistantOrb state={thinking ? "thinking" : "idle"} className="relative size-9 sm:size-10" />
         <div className="relative min-w-0 flex-1">
           <p className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em] text-snow">
             {assistantConfig.name}
@@ -126,11 +129,11 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
       </header>
 
       {/* Conversación */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain px-4 py-5" aria-live="polite" aria-relevant="additions">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3.5 py-4 sm:px-4 sm:py-5" aria-live="polite" aria-relevant="additions">
         {empty ? (
           <Welcome />
         ) : (
-          <ol className="space-y-5">
+          <ol className="space-y-4 sm:space-y-5">
             {messages.map((message) => (
               <m.li
                 key={message.id}
@@ -196,7 +199,7 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
           event.preventDefault();
           send(draft);
         }}
-        className="border-t border-line px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+        className="border-t border-line px-2.5 pt-2.5 pb-2.5 sm:px-3 sm:pt-3 sm:pb-3"
       >
         <div className="flex items-end gap-2 rounded-2xl border border-line-strong bg-white/[0.03] p-1.5 pl-3.5 transition-colors focus-within:border-glow/45">
           <label htmlFor="jeipy-ai-input" className="sr-only">
@@ -223,7 +226,7 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
             </svg>
           </button>
         </div>
-        <p className="mt-2 text-center text-[11px] text-mist/60">Recomendaciones orientativas. El alcance final se confirma con el equipo.</p>
+        <p className="mt-1.5 text-center text-[11px] text-mist/60 sm:mt-2">Recomendaciones orientativas. El alcance final se confirma con el equipo.</p>
       </form>
     </m.div>
   );

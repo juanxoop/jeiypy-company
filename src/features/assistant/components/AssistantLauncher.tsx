@@ -95,7 +95,7 @@ export function AssistantLauncher() {
     buttonRef.current?.focus({ preventScroll: true });
   }, []);
 
-  // Escape cierra; en móvil el panel ocupa la pantalla y bloquea el scroll de fondo.
+  // Escape cierra; en móvil el panel ocupa casi toda la pantalla y bloquea el scroll de fondo.
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
