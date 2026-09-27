@@ -269,16 +269,28 @@ export function recommendPlan(profile: Profile, capTier?: Tier): Recommendation 
   let meanwhile: string[] | undefined;
 
   if (budgetGap) {
-    intro = `Te soy transparente: con ${formatCop(budget!)} todavía no alcanza ningún plan estándar. La opción más cercana para ${business} es nuestro plan de entrada:`;
-    title = "Plan de entrada";
+    // Nunca se presenta Básico como solución completa si lo que pidió necesita más.
+    const cov = coverage(profile, "basico");
+    const needsMore = ideal !== "basico" && cov.lost.length > 0;
+    intro = needsMore
+      ? `Te soy transparente: por lo que necesitas, lo ideal sería **${tierLabel(ideal)}**, que es el que incluye ${joinNatural(cov.lost)}. Con ${formatCop(budget!)} todavía no alcanza ningún plan estándar; lo más cercano es empezar con el plan de entrada como primera fase:`
+      : `Te soy transparente: con ${formatCop(budget!)} todavía no alcanza ningún plan estándar. La opción más cercana para ${business} es nuestro plan de entrada:`;
+    title = needsMore ? "Primera fase (plan de entrada)" : "Plan de entrada";
+    if (needsMore) {
+      keeps = firstUpper(cov.kept);
+      later = firstUpper(cov.lost);
+      meanwhile = cov.workarounds.length ? cov.workarounds : undefined;
+    }
     // Las formas de ajustar la inversión se listan justo después de la tarjeta: no se repiten aquí.
   } else if (downgraded) {
     const cov = coverage(profile, tier);
+    // Se distingue el plan ideal por necesidad de la primera fase que entra en el presupuesto.
+    const ideally = cov.lost.length ? `Por lo que necesitas, lo ideal sería **${tierLabel(ideal)}**, que es el que incluye ${joinNatural(cov.lost)}. ` : "";
     intro =
       budget !== undefined
-        ? `Para empezar dentro de tu presupuesto (${formatCop(budget)}), esta es la opción que más sentido tiene:`
-        : "Para empezar con una inversión menor, esta es la opción que más sentido tiene:";
-    title = "Recomendado para empezar";
+        ? `${ideally}Para empezar dentro de tu presupuesto (${formatCop(budget)}), esta primera fase es la que más sentido tiene:`
+        : `${ideally}Para empezar con una inversión menor, esta primera fase es la que más sentido tiene:`;
+    title = cov.lost.length ? "Primera fase (ajustada a tu presupuesto)" : "Recomendado para empezar";
     keeps = firstUpper(cov.kept);
     later = cov.lost.length ? firstUpper(cov.lost) : undefined;
     meanwhile = cov.workarounds.length ? cov.workarounds : undefined;

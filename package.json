@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:leads": "tsx --conditions=react-server scripts/test-lead-persistence.ts",
     "test:assistant": "tsx --conditions=react-server scripts/test-assistant-language.ts",
-    "test": "npm run test:assistant && npm run test:leads"
+    "test": "npm run test:assistant && npm run test:conversation && npm run test:leads",
+    "test:conversation": "tsx --conditions=react-server scripts/test-assistant-conversation.ts"
   },
   "dependencies": {
     "framer-motion": "^13.4.1",

@@ -213,6 +213,7 @@ const KINDS: [string, string][] = [
   ["Me encanta", "positive"], ["La verdad no", "negative"], ["No sé todavía", "uncertain"], ["¿Cuánto cuesta el catálogo?", "question"],
   ["Perdón, sí tengo página", "correction"], ["Está bueno pero no me alcanza", "budget_objection"], ["Solo tengo WhatsApp", "free_text_information"],
   ["asdf qwerty", "unknown"],
+  ["bro tengo una duda más", "pause"], ["¿cómo así? no entendí", "clarification_request"], ["Quiero que me llamen", "commercial_intent"],
 ];
 for (const [phrase, kind] of KINDS) {
   const got = interpretReply(phrase, asking).kind;

@@ -142,6 +142,8 @@ export function detectIntent(raw: string): Intent | null {
       " mucha plata", " mucho dinero", " fuera de mi presupuesto", " fuera del presupuesto", " sale de mi presupuesto",
       " se sale de mi", " pasa de mi presupuesto", " mas barato", " mas barata", " economico", " economica", " no puedo pagar",
       " no puedo invertir", " no me da el presupuesto", " menos plata", " menos dinero", " mas bajo", " rebaja", " descuento",
+      " poco presupuesto", " presupuesto bajo", " presupuesto limitado", " presupuesto corto", " presupuesto ajustado",
+      " presupuesto apretado", " no tengo mucho presupuesto", " no tengo mucha plata", " estoy corto de", " ando corto",
     )
   )
     return { type: "objection-price" };
@@ -731,4 +733,38 @@ export function budgetCorrection(raw: string): "lower" | "higher" | undefined {
   if (has(t, " menor", " mas bajo", " menos", " mas poco", " no es tanto", " no tengo tanto", " mas corto", " mas ajustado", " apretado")) return "lower";
   if (has(t, " mayor", " mas alto", " mas plata", " mas dinero", " puedo invertir mas", " tengo mas")) return "higher";
   return undefined;
+}
+
+/* ---------------------------------------------------------------
+   Conversación: pausas, preguntas intermedias y tono
+   --------------------------------------------------------------- */
+
+/**
+ * El visitante anuncia una duda o pide una pausa antes de seguir ("bro tengo una duda más",
+ * "espera", "antes de eso…"). No es la respuesta al dato pendiente.
+ */
+export function wantsToAsk(raw: string): boolean {
+  const t = normalize(raw);
+  return (
+    has(t, " tengo una duda", " tengo otra duda", " una duda", " tengo una pregunta", " tengo otra pregunta", " una pregunta", " una consulta",
+      " antes de eso", " antes de seguir", " antes de continuar", " antes de darte", " espera ", " esperame", " espera un", " un momento",
+      " un segundo", " otra cosa", " una cosa mas", " quiero preguntar", " queria preguntar", " me surgio", " pregunta rapida") ||
+    /^ (espera|esperame|pera|momento|un momento|ey|oye|oiga) /.test(t)
+  );
+}
+
+/** Pregunta por qué se pide un dato ("¿para qué necesitan mi correo?"). */
+export function slotPurposeQuestion(raw: string): "email" | "phone" | "name" | "businessName" | undefined {
+  const t = normalize(raw);
+  if (!has(t, " para que ", " por que ", " porque ", " es obligatorio", " es necesario", " tengo que dar", " toca dar")) return undefined;
+  if (has(t, " correo", " email", " mail")) return "email";
+  if (has(t, " telefono", " numero", " celular", " whatsapp")) return "phone";
+  if (has(t, " nombre del negocio", " nombre de mi negocio", " negocio")) return "businessName";
+  if (has(t, " nombre")) return "name";
+  return undefined;
+}
+
+/** Registro informal ("bro", "parce", "jaja", "de una"): el asistente puede responder un poco más cercano. */
+export function isInformal(raw: string): boolean {
+  return /(^| )(bro|broo|parce|parcero|hermano|mano|llave|man|jaja\w*|jeje\w*|de una|q|xq|pq|sisas|chimba|bacano)( |$)/.test(normalize(raw));
 }

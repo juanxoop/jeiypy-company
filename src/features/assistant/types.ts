@@ -135,6 +135,13 @@ export type ConversationState = {
    * (positive, negative, uncertain, correction…). Últimas 30.
    */
   answers?: { slot: string; raw: string; kind: string }[];
+  /** Registro del visitante: si escribe informal ("bro", "de una"), el asistente responde un poco más cercano. */
+  tone?: "informal";
+  /**
+   * Funciones por las que el visitante preguntó ("¿puedo tener reservas?") y que cambiarían la
+   * propuesta: si responde "sí", se suman y se recalcula. Dura solo el turno siguiente.
+   */
+  offer?: Feature[];
 };
 
 /**

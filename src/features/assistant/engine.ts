@@ -39,6 +39,10 @@ import {
   parseAiLevelAnswer,
   parseYesNo,
   businessKind,
+  hasCorrectionMarker,
+  isInformal,
+  slotPurposeQuestion,
+  wantsToAsk,
   type Intent,
 } from "./nlu";
 import { CHANNEL_LABEL, FEATURE_LABEL, GOAL_LABEL, needsLabels, presenceLabel } from "@/features/leads/labels";
@@ -308,7 +312,7 @@ function presenceAck(profile: Profile): string {
 }
 
 /** Qué aprendió de un mensaje libre, para acusarlo en una frase. */
-function learnedAck(before: Profile, after: Profile): string | undefined {
+function learnedAck(before: Profile, after: Profile, correcting = false): string | undefined {
   const parts: string[] = [];
   if (!before.businessType && after.businessType) parts.push(businessAck(after.businessType));
   const presenceParts: string[] = [];
@@ -317,8 +321,10 @@ function learnedAck(before: Profile, after: Profile): string | undefined {
   if (presenceChanged && after.websiteStatus) {
     presenceParts.push(
       before.websiteStatus === "none" && after.websiteStatus !== "none"
-        ? `Anotado: también tienes página web. ${presenceAck(after)}`
-        : presenceAck(after),
+        ? `${correcting ? "Perfecto, lo corrijo: sí tienes página web." : "Anotado: también tienes página web."} ${presenceAck(after)}`
+        : correcting
+          ? `Perfecto, lo corrijo. ${presenceAck(after)}`
+          : presenceAck(after),
     );
   }
   // Una sola vez "Perfecto" por mensaje.
@@ -821,11 +827,18 @@ function offerCheaper(state: ConversationState, kind: "price" | "scope", from?: 
   const lower = nextLowerTier(state.profile, current);
   if (!lower) return entryOptions(state);
 
+  // Primero lo que de verdad necesita (el plan ideal) y luego la versión recortada, con lo que queda fuera.
+  const lost = coverage(state.profile, lower).lost;
+  const ideal = lost.length && !from ? ` Por lo que me contaste, lo ideal es **${tierLabel(current)}**, porque incluye ${joinNatural(lost)}.` : "";
   const ack = from
     ? "Entiendo. Bajemos un nivel más:"
     : kind === "price"
-      ? "Entiendo, la inversión importa. Podemos simplificar la solución sin perder lo principal:"
-      : "Tiene sentido empezar con lo necesario. Esta sería la base:";
+      ? `Entiendo, la inversión importa.${ideal} Si prefieres empezar con menos, esta sería una primera fase:`
+      : `Tiene sentido empezar con lo necesario.${ideal} Esta sería la base:`;
+  const askFigure =
+    state.profile.budget === undefined || state.profile.budget === "skipped"
+      ? [text("Si me dices una cifra aproximada, lo ajusto con más precisión.")]
+      : [];
   const card = alternativeCard(state.profile, lower);
   card.actions = [
     { label: "Me interesa esta alternativa", message: "Sí, me interesa", primary: true },
@@ -834,7 +847,7 @@ function offerCheaper(state: ConversationState, kind: "price" | "scope", from?: 
   // La tarjeta ya pregunta con sus botones; el visitante también puede responder con sus palabras.
   const slot: Slot = { kind: "confirm-plan", tier: lower, from: current };
   return {
-    blocks: [text(ack), card],
+    blocks: [text(ack), card, ...askFigure],
     quickReplies: ["¿Cuál es la diferencia?"],
     state: { ...state, expecting: slot, comparePair: [current, lower], retries: 0 },
   };
@@ -1232,6 +1245,145 @@ function startAiTierFlow(id: AiTierId, state: ConversationState): Reply {
    Punto de entrada
    --------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------
+   Preguntas intermedias: se responden y se retoma el hilo
+   --------------------------------------------------------------- */
+
+/** "Claro" o, si el visitante escribe informal, "De una". */
+const sure = (state: ConversationState) => (state.tone === "informal" ? "De una" : "Claro");
+
+/** Cómo retomar cada dato pendiente sin forzarlo. */
+const RESUME: Partial<Record<Slot["kind"], string>> = {
+  name: "Cuando quieras seguimos: ¿cómo te llamas?",
+  phone: "Y cuando quieras seguimos con tu teléfono para dejar la solicitud lista.",
+  email: "Y si quieres, me dejas tu correo; es opcional.",
+  businessName: "Cuando quieras, seguimos con el nombre de tu negocio.",
+  channel: "Cuando quieras, dime por dónde prefieres que te contactemos: WhatsApp, llamada o correo.",
+  preferredTime: "Y cuando quieras, dime en qué horario te queda mejor la llamada.",
+  "confirm-contact": "Cuando quieras, confírmame si tus datos están bien.",
+  consent: "Cuando quieras, confírmame si nos autorizas a contactarte sobre esta solicitud.",
+};
+
+function resume(slot: Slot, state: ConversationState): { blocks: MessageBlock[]; quickReplies?: string[] } {
+  const q = question(slot, state);
+  const line = RESUME[slot.kind];
+  return line ? { blocks: [text(line)], quickReplies: q.quickReplies } : { blocks: [text("Y volviendo a lo tuyo:"), ...q.blocks], quickReplies: q.quickReplies };
+}
+
+/** Para qué se pide cada dato: se responde con honestidad. */
+const PURPOSE: Record<NonNullable<ReturnType<typeof slotPurposeQuestion>>, string> = {
+  email: "Buena pregunta. El correo es opcional: solo sirve para enviarte la propuesta por escrito si lo prefieres. No lo usamos para nada más.",
+  phone: "Te explico: el teléfono es para que un asesor de Jeipy te contacte por WhatsApp o llamada sobre esta solicitud. Solo se usa para eso.",
+  name: "Es para saber cómo dirigirnos a ti cuando el equipo te contacte.",
+  businessName: "Es para que el equipo identifique tu negocio y prepare la propuesta; si aún no tiene nombre, no pasa nada.",
+};
+
+/** Qué nivel cubre cada función y cómo se nombra al responder "¿se puede…?". */
+const FEATURE_ANSWER: Record<Feature, { tier: Tier; line: string }> = {
+  booking: { tier: "premium", line: "Sí, eso se puede: las reservas o citas automáticas desde la web vienen con **Premium**." },
+  automation: { tier: "premium", line: "Sí: las automatizaciones (cotizaciones, seguimiento y clasificación de clientes) vienen con **Premium**." },
+  integrations: { tier: "premium", line: "Sí: las integraciones con otras herramientas vienen con **Premium**." },
+  catalog: { tier: "esencial", line: "Sí: el catálogo con precios viene desde **Esencial**." },
+  forms: { tier: "esencial", line: "Sí: los formularios de contacto o cotización vienen desde **Esencial**." },
+  seo: { tier: "esencial", line: "Sí: el SEO básico para aparecer en Google viene desde **Esencial**." },
+  ai: { tier: "esencial-ai", line: "Sí: un asistente con IA como este se suma desde **Esencial** con Jeipy AI Lite (se contrata aparte)." },
+};
+
+/** "¿Puedo tener reservas en la web?": qué plan lo cubre y si cambia la propuesta actual. No lo activa solo. */
+function featureAnswer(features: Feature[], state: ConversationState): { blocks: MessageBlock[]; offer?: Feature[] } {
+  const lines = features.map((f) => FEATURE_ANSWER[f].line);
+  const needed = features.map((f) => FEATURE_ANSWER[f].tier).sort((a, b) => tierRank(b) - tierRank(a))[0];
+  if (state.recommended) {
+    const current = tierOf(state.recommended, state.recommendedAi);
+    if (tierRank(current) >= tierRank(needed)) {
+      lines.push(`Tu propuesta de ${tierLabel(current)} ya lo incluye.`);
+    } else {
+      lines.push(`Tu propuesta actual (${tierLabel(current)}) no lo incluye: si lo quieres, pasaría a **${tierLabel(needed)}**. ¿Lo sumamos?`);
+      return { blocks: [text(lines.join(" "))], offer: features };
+    }
+  }
+  return { blocks: [text(lines.join(" "))] };
+}
+
+/** Intenciones que solo piden información (no cambian el flujo): se pueden responder a mitad de algo. */
+const INFO_INTENTS = new Set<Intent["type"]>([
+  "about", "services", "prices", "upgrade-later", "compare", "plan-info", "process", "ai-info", "ai-pricing", "ai-monthly",
+  "guarantee", "unknown-topic",
+]);
+
+function answerQuestion(input: string, state: ConversationState): { blocks: MessageBlock[]; offer?: Feature[] } | null {
+  const purpose = slotPurposeQuestion(input);
+  if (purpose) return { blocks: [text(PURPOSE[purpose])] };
+  const intent = detectIntent(input);
+  if (intent && INFO_INTENTS.has(intent.type)) {
+    const answer = answerIntent(intent, state);
+    if (answer) return { blocks: answer.blocks };
+  }
+  const features = (Object.entries(extractFeatures(input)) as [Feature, boolean][]).filter(([, v]) => v).map(([f]) => f);
+  if (features.length) return featureAnswer(features, state);
+  return null;
+}
+
+/**
+ * Una pausa ("espera, tengo una duda") o una pregunta a mitad de un flujo: se atiende primero y se
+ * retoma el dato pendiente con suavidad. Si el mensaje trae el dato pedido, es la respuesta y sigue el flujo.
+ */
+function handleAside(input: string, state: ConversationState, slot: Slot): Reply | null {
+  const question = isQuestion(input) || Boolean(slotPurposeQuestion(input));
+  const pause = wantsToAsk(input);
+  if (!question && !pause) return null;
+  if (slot.kind === "phone" && extractPhone(input)) return null;
+  if (slot.kind === "email" && extractEmail(input)) return null;
+  const st: ConversationState = { ...state, tone: isInformal(input) ? "informal" : state.tone, retries: 0 };
+  const answer = question ? answerQuestion(input, st) : null;
+  if (!answer && !question) {
+    return {
+      blocks: [text(`${sure(st)}, dime tu duda.${CONTACT_SLOTS.has(slot.kind) ? " Tu solicitud queda en pausa mientras tanto; no se pierde nada." : ""}`)],
+      quickReplies: [],
+      state: st,
+    };
+  }
+  const r = resume(slot, st);
+  return {
+    blocks: [...(answer?.blocks ?? [text("Buena pregunta. Eso no lo tengo confirmado y prefiero no inventarlo; el equipo te lo aclara cuando te contacte.")]), ...r.blocks],
+    quickReplies: answer?.offer ? ["Sí, súmalo", "No, sigamos así"] : r.quickReplies,
+    state: { ...st, offer: answer?.offer },
+  };
+}
+
+/**
+ * Respuesta a "¿Lo sumamos?" tras preguntar por una función: con un sí se suma, se recalcula la
+ * propuesta (sin el tope de una alternativa anterior) y se retoma lo pendiente; con un no, se sigue igual.
+ */
+function answerOffer(input: string, state: ConversationState): Reply | null {
+  const offer = state.offer;
+  if (!offer?.length || isQuestion(input)) return null;
+  const { polarity } = readPolarity(input);
+  if (polarity !== "positive" && polarity !== "negative") return null;
+  const slot = state.expecting;
+  const base: ConversationState = { ...state, offer: undefined };
+  const current = state.recommended ? tierLabel(tierOf(state.recommended, state.recommendedAi)) : undefined;
+  if (polarity === "negative") {
+    const blocks = [text(`${sure(state)}, seguimos${current ? ` con ${current}` : ""}.`)];
+    if (!slot) return { blocks, quickReplies: CHIPS.afterRecommendation, state: base };
+    const r = resume(slot, base);
+    return { blocks: [...blocks, ...r.blocks], quickReplies: r.quickReplies, state: base };
+  }
+  const profile: Profile = { ...state.profile, features: { ...state.profile.features } };
+  for (const f of offer) profile.features[f] = true;
+  const next: ConversationState = { ...base, profile, planCap: undefined };
+  const ack = `${sure(state)}, sumo ${joinNatural(offer.map((f) => FEATURE_SHORT[f]))}. Así queda tu propuesta:`;
+  // En medio de los datos de contacto: se actualiza la tarjeta y se retoma el dato pendiente.
+  if (slot && CONTACT_SLOTS.has(slot.kind)) {
+    const { needsHuman: _n, intro: _i, tier: _t, ideal: _d, ...card } = recommendPlan(profile);
+    void _n; void _i; void _t; void _d;
+    const updated: ConversationState = { ...next, recommended: card.planId, recommendedAi: card.aiTier };
+    const r = resume(slot, updated);
+    return { blocks: [text(ack), card, ...r.blocks], quickReplies: r.quickReplies, state: updated };
+  }
+  return recommend({ ...next, expecting: null }, [text(ack)]);
+}
+
 /** Una sola pregunta concreta cuando la respuesta no se pudo interpretar. */
 function clarify(slot: Slot, state: ConversationState): { blocks: MessageBlock[]; quickReplies?: string[] } {
   const q = question(slot, state);
@@ -1274,7 +1426,11 @@ function clarify(slot: Slot, state: ConversationState): { blocks: MessageBlock[]
  * original y su interpretación (ver `interpret.ts`).
  */
 export function respond(input: string, current: ConversationState): Reply {
-  const turn = respondTo(input, current);
+  const raw = respondTo(input, current);
+  // Si el visitante escribe informal, el tono se mantiene un poco más cercano el resto de la conversación.
+  let turn = isInformal(input) && raw.state.tone !== "informal" ? { ...raw, state: { ...raw.state, tone: "informal" as const } } : raw;
+  // La oferta de sumar una función solo vale para la respuesta inmediata.
+  if (turn.state.offer && turn.state.offer === current.offer) turn = { ...turn, state: { ...turn.state, offer: undefined } };
   if (!current.expecting) return turn;
   const { kind }: Interpretation = interpretReply(input, current);
   const answers = [...(turn.state.answers ?? current.answers ?? []), { slot: slotKey(current.expecting), raw: input, kind }].slice(-30);
@@ -1289,9 +1445,20 @@ function respondTo(input: string, current: ConversationState): Reply {
     return { blocks: [text("Listo, empecemos de nuevo. ¿En qué te ayudo?")], quickReplies: CHIPS.start, state: { ...current, flow: "free", expecting: null } };
   }
 
+  // "¿Lo sumamos?" tras preguntar por una función: un sí la suma y recalcula; un no deja todo igual.
+  const offerReply = answerOffer(input, current);
+  if (offerReply) return offerReply;
+
   // 1. Respuesta a la pregunta pendiente (tiene prioridad: "solo redes y WhatsApp" es un dato, no una petición).
   if (current.expecting) {
     const slot = current.expecting;
+
+    // Datos de contacto: una duda o una pausa ("bro tengo una duda más", "antes de eso…") se atiende
+    // primero; el dato pendiente espera. Nunca se responde "número inválido" a una pregunta.
+    if (CONTACT_SLOTS.has(slot.kind)) {
+      const aside = handleAside(input, current, slot);
+      if (aside) return aside;
+    }
 
     if (slot.kind === "confirm-plan") {
       const base: ConversationState = { ...current, expecting: null };
@@ -1382,7 +1549,7 @@ function respondTo(input: string, current: ConversationState): Reply {
       const learnedMid = enrichProfile(current.profile, input);
       if (JSON.stringify(learnedMid) !== JSON.stringify(current.profile)) {
         return advance({ ...current, profile: learnedMid, expecting: null, retries: 0 }, [
-          text(learnedAck(current.profile, learnedMid) ?? "Anotado, lo tengo en cuenta."),
+          text(learnedAck(current.profile, learnedMid, hasCorrectionMarker(input)) ?? "Anotado, lo tengo en cuenta."),
         ]);
       }
     }
@@ -1405,9 +1572,15 @@ function respondTo(input: string, current: ConversationState): Reply {
       }
       const answer = answerIntent(intent, current);
       if (answer) {
-        const q = question(slot, current);
-        return { blocks: [...answer.blocks, text("Retomando:"), ...q.blocks], quickReplies: q.quickReplies, state: current };
+        const r = resume(slot, current);
+        return { blocks: [...answer.blocks, ...r.blocks], quickReplies: r.quickReplies, state: current };
       }
+    }
+
+    // Otra pregunta o una pausa a mitad del diagnóstico: se responde y se retoma donde iba.
+    if (diagnosing && slot.kind !== "confirm-plan") {
+      const aside = handleAside(input, current, slot);
+      if (aside) return aside;
     }
 
     // "No sé", "tal vez", "déjame pensarlo" ante una pregunta del diagnóstico: no se insiste, se sigue.
@@ -1521,6 +1694,19 @@ function respondTo(input: string, current: ConversationState): Reply {
     return planInfo(current.recommended, current);
   }
 
+  // Una pregunta sobre una función ("¿puedo tener reservas en la web?") se responde; no se activa sola.
+  if (isQuestion(input) && current.recommended && !/ (quiero|necesito|me gustaria) /.test(normalize(input))) {
+    const features = (Object.entries(extractFeatures(input)) as [Feature, boolean][]).filter(([, v]) => v).map(([f]) => f);
+    if (features.length) {
+      const answer = featureAnswer(features, current);
+      return {
+        blocks: answer.blocks,
+        quickReplies: answer.offer ? ["Sí, súmalo", "No, sigamos así"] : CHIPS.afterRecommendation,
+        state: { ...current, offer: answer.offer },
+      };
+    }
+  }
+
   // 4. Flujos guiados.
   const enriched = enrichProfile(current.profile, input);
   const learned = JSON.stringify(enriched) !== JSON.stringify(current.profile);
@@ -1567,7 +1753,7 @@ function respondTo(input: string, current: ConversationState): Reply {
 
   // 6. El visitante cuenta algo de su negocio: se guarda, se acusa y se sigue sin repetir preguntas.
   if (learned) {
-    const ack = learnedAck(current.profile, enriched);
+    const ack = learnedAck(current.profile, enriched, hasCorrectionMarker(input));
     if (current.recommended) {
       const before = tierOf(current.recommended, current.recommendedAi);
       const { tier } = recommendPlan(enriched, current.planCap);
