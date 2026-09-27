@@ -1,6 +1,9 @@
 /**
  * Sesión del equipo para /admin: cookie httpOnly firmada con HMAC-SHA256 (Web Crypto),
  * con vencimiento. Sin dependencias, válida en Proxy y en el servidor.
+ *
+ * La firma usa ADMIN_SESSION_SECRET junto con ADMIN_PASSWORD: cambiar cualquiera de los dos
+ * invalida al instante todas las sesiones abiertas (p. ej. si una cookie pudo haberse copiado).
  */
 export const ADMIN_COOKIE = "jeipy_admin";
 export const SESSION_HOURS = 12;
@@ -10,6 +13,10 @@ const encoder = new TextEncoder();
 function base64url(bytes: ArrayBuffer): string {
   return Buffer.from(bytes).toString("base64url");
 }
+
+/** Material de la firma: secreto + contraseña del equipo. */
+export const sessionKey = (secret: string | undefined, password: string | undefined) =>
+  secret && secret.length >= 32 && password ? `${secret}\u0000${password}` : undefined;
 
 async function sign(secret: string, data: string): Promise<string> {
   const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -24,15 +31,18 @@ export function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export async function createSessionToken(secret: string, now = Date.now()): Promise<string> {
+/** `key`: resultado de `sessionKey(secret, password)`. */
+export async function createSessionToken(key: string, now = Date.now()): Promise<string> {
   const payload = `v1.${now + SESSION_HOURS * 3_600_000}`;
-  return `${payload}.${await sign(secret, payload)}`;
+  return `${payload}.${await sign(key, payload)}`;
 }
 
-export async function verifySessionToken(token: string | undefined, secret: string | undefined, now = Date.now()): Promise<boolean> {
-  if (!token || !secret || secret.length < 32) return false;
+export async function verifySessionToken(token: string | undefined, key: string | undefined, now = Date.now()): Promise<boolean> {
+  if (!token || !key || key.length < 32) return false;
   const [version, expires, signature] = token.split(".");
   if (version !== "v1" || !expires || !signature) return false;
   if (!/^\d+$/.test(expires) || Number(expires) < now) return false;
-  return safeEqual(signature, await sign(secret, `${version}.${expires}`));
+  // Nunca más allá de la duración máxima de una sesión (un token mal formado no dura "para siempre").
+  if (Number(expires) > now + SESSION_HOURS * 3_600_000 + 60_000) return false;
+  return safeEqual(signature, await sign(key, `${version}.${expires}`));
 }

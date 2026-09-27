@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { LEAD_STATUSES, type LeadStatus } from "@/features/leads/types";
 import { adminConfig, isAdminConfigured, passwordMatches, requireAdmin } from "@/server/admin/auth";
-import { ADMIN_COOKIE, SESSION_HOURS, createSessionToken } from "@/server/admin/session";
+import { ADMIN_COOKIE, SESSION_HOURS, createSessionToken, sessionKey } from "@/server/admin/session";
 import { LIMITS, isRateLimited } from "@/server/leads/rate-limit";
 import { addLeadNote, updateLeadStatus } from "@/server/leads/store";
 
@@ -22,7 +22,7 @@ export async function login(_: FormState, formData: FormData): Promise<FormState
     console.warn(`[admin] Intento de acceso fallido desde ${ip}`);
     return { error: "Contraseña incorrecta." };
   }
-  (await cookies()).set(ADMIN_COOKIE, await createSessionToken(adminConfig.secret!), {
+  (await cookies()).set(ADMIN_COOKIE, await createSessionToken(sessionKey(adminConfig.secret, adminConfig.password)!), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",

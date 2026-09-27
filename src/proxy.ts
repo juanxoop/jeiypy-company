@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ADMIN_COOKIE, verifySessionToken } from "@/server/admin/session";
+import { ADMIN_COOKIE, sessionKey, verifySessionToken } from "@/server/admin/session";
 
 /**
  * Primera barrera de /admin: sin una sesión válida redirige al inicio de sesión.
@@ -9,7 +9,8 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (pathname === "/admin/login") return NextResponse.next();
 
-  const valid = await verifySessionToken(request.cookies.get(ADMIN_COOKIE)?.value, process.env.ADMIN_SESSION_SECRET?.trim());
+  const key = sessionKey(process.env.ADMIN_SESSION_SECRET?.trim() || undefined, process.env.ADMIN_PASSWORD?.trim() || undefined);
+  const valid = await verifySessionToken(request.cookies.get(ADMIN_COOKIE)?.value, key);
   if (!valid) return NextResponse.redirect(new URL("/admin/login", request.url));
 
   const response = NextResponse.next();

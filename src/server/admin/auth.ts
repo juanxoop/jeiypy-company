@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { ADMIN_COOKIE, verifySessionToken } from "./session";
+import { ADMIN_COOKIE, sessionKey, verifySessionToken } from "./session";
 
 /**
  * Acceso del equipo a la bandeja. Se configura con variables de entorno del servidor:
@@ -28,7 +28,7 @@ export async function isAdmin(): Promise<boolean> {
   // Se lee la cookie siempre: así la página nunca se prerenderiza como estática.
   const token = (await cookies()).get(ADMIN_COOKIE)?.value;
   if (!isAdminConfigured()) return false;
-  return verifySessionToken(token, adminConfig.secret);
+  return verifySessionToken(token, sessionKey(adminConfig.secret, adminConfig.password));
 }
 
 /**
