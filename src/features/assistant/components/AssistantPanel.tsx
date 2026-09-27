@@ -1,13 +1,31 @@
 "use client";
 
-import { m } from "framer-motion";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { m, useReducedMotion } from "framer-motion";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { assistantConfig } from "@/config/assistant";
 import { cn } from "@/lib/cn";
 import { easeJeipy } from "@/lib/motion";
+import type { ChatMessage } from "../types";
 import { useAssistant } from "../useAssistant";
 import { AssistantOrb } from "./AssistantOrb";
 import { MessageBlocks, type BlockActions } from "./MessageBlocks";
+
+/**
+ * Apertura y cierre con `transform` como una sola cadena: Framer Motion lo anima con WAAPI en el
+ * compositor, así la animación sigue fluida aunque el hilo principal esté ocupado montando el historial.
+ * (`y` y `scale` por separado se calculan cuadro a cuadro en JavaScript.)
+ */
+const PANEL_MOTION = {
+  initial: { opacity: 0, transform: "translateY(16px) scale(0.97)" },
+  animate: { opacity: 1, transform: "translateY(0px) scale(1)" },
+  exit: { opacity: 0, transform: "translateY(12px) scale(0.98)", transition: { duration: 0.2 } },
+};
+/** Con "reducir movimiento" solo se funde (MotionConfig no omite `transform` escrito como cadena). */
+const PANEL_MOTION_REDUCED = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0, transition: { duration: 0.2 } },
+};
 
 type AssistantPanelProps = {
   onClose: () => void;
@@ -24,6 +42,9 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
   const scrollRef = useRef<HTMLDivElement>(null);
   const thinking = status === "thinking" || status === "sending";
   const empty = messages.length === 0;
+  const motionProps = useReducedMotion() ? PANEL_MOTION_REDUCED : PANEL_MOTION;
+  // Mensajes que ya existían al abrir el panel: se muestran quietos, sin animación de entrada.
+  const [seen] = useState(() => new Set(messages.map((message) => message.id)));
 
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
@@ -38,11 +59,21 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
     onRequestHandled?.();
   }, [request, thinking, sendMessage, onRequestHandled]);
 
-  // Mantener visible lo último de la conversación.
+  // Al abrir, el panel aparece ya en lo último de la conversación (sin recorrer el historial).
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+
+  // Mensajes nuevos: desplazamiento suave hasta lo último.
+  const progress = `${messages.length}:${thinking}`;
+  const lastProgress = useRef(progress);
   useEffect(() => {
+    if (lastProgress.current === progress) return;
+    lastProgress.current = progress;
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages.length, thinking]);
+  }, [progress]);
 
   const send = (text: string) => {
     if (text === "Reintentar" && status === "error") return assistant.retry();
@@ -58,22 +89,28 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
     }
   };
 
-  const blockActions: BlockActions = {
-    onSend: send,
-    onNavigate: (href) => {
-      onClose();
-      document.querySelector(href)?.scrollIntoView({ behavior: "smooth" });
-    },
-  };
+  // Acciones estables: escribir en la caja de texto no vuelve a renderizar el historial.
+  const sendRef = useRef(send);
+  useLayoutEffect(() => {
+    sendRef.current = send;
+  });
+  const blockActions = useMemo<BlockActions>(
+    () => ({
+      onSend: (text) => sendRef.current(text),
+      onNavigate: (href) => {
+        onClose();
+        document.querySelector(href)?.scrollIntoView({ behavior: "smooth" });
+      },
+    }),
+    [onClose],
+  );
 
   return (
     <m.div
       id="jeipy-ai-panel"
       role="dialog"
       aria-label={assistantConfig.name}
-      initial={{ opacity: 0, y: 16, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 12, scale: 0.98, transition: { duration: 0.2 } }}
+      {...motionProps}
       transition={{ duration: 0.4, ease: easeJeipy }}
       style={{ transformOrigin: "bottom right" }}
       className={cn(
@@ -133,40 +170,7 @@ export function AssistantPanel({ onClose, request, onRequestHandled }: Assistant
         {empty ? (
           <Welcome />
         ) : (
-          <ol className="space-y-4 sm:space-y-5">
-            {messages.map((message) => (
-              <m.li
-                key={message.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.35, ease: easeJeipy }}
-                className={cn("flex gap-2.5", message.role === "user" && "justify-end")}
-              >
-                {message.role === "assistant" ? (
-                  <>
-                    <AssistantOrb still className="mt-0.5 size-6" />
-                    <div className="min-w-0 flex-1">
-                      <MessageBlocks blocks={message.blocks} actions={blockActions} />
-                    </div>
-                  </>
-                ) : (
-                  <p className="max-w-[85%] rounded-2xl rounded-br-md bg-jeipy px-3.5 py-2.5 text-[14px] leading-relaxed text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)]">
-                    {message.text}
-                  </p>
-                )}
-              </m.li>
-            ))}
-            {thinking && (
-              <li className="flex items-center gap-2.5" aria-label="Jeipy AI está analizando">
-                <AssistantOrb state="thinking" className="size-6" />
-                <span className="flex gap-1">
-                  {[0, 1, 2].map((i) => (
-                    <span key={i} className="jp-typing-dot size-1.5 rounded-full bg-glow" style={{ animationDelay: `${i * 0.15}s` }} />
-                  ))}
-                </span>
-              </li>
-            )}
-          </ol>
+          <MessageList messages={messages} seen={seen} thinking={thinking} actions={blockActions} />
         )}
 
         {!thinking && quickReplies.length > 0 && (
@@ -246,3 +250,57 @@ function Welcome() {
     </div>
   );
 }
+
+/**
+ * Historial de la conversación. Memorizado: solo se vuelve a renderizar cuando cambian los mensajes
+ * o el estado "pensando", no con cada tecla que se escribe.
+ */
+const MessageList = memo(function MessageList({
+  messages,
+  seen,
+  thinking,
+  actions,
+}: {
+  messages: ChatMessage[];
+  seen: ReadonlySet<string>;
+  thinking: boolean;
+  actions: BlockActions;
+}) {
+  return (
+    <ol className="space-y-4 sm:space-y-5">
+      {messages.map((message) => (
+        <m.li
+          key={message.id}
+          // El historial ya visto aparece quieto; solo se animan los mensajes nuevos.
+          initial={seen.has(message.id) ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: easeJeipy }}
+          className={cn("flex gap-2.5", message.role === "user" && "justify-end")}
+        >
+          {message.role === "assistant" ? (
+            <>
+              <AssistantOrb still className="mt-0.5 size-6" />
+              <div className="min-w-0 flex-1">
+                <MessageBlocks blocks={message.blocks} actions={actions} />
+              </div>
+            </>
+          ) : (
+            <p className="max-w-[85%] rounded-2xl rounded-br-md bg-jeipy px-3.5 py-2.5 text-[14px] leading-relaxed text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)]">
+              {message.text}
+            </p>
+          )}
+        </m.li>
+      ))}
+      {thinking && (
+        <li className="flex items-center gap-2.5" aria-label="Jeipy AI está analizando">
+          <AssistantOrb state="thinking" className="size-6" />
+          <span className="flex gap-1">
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="jp-typing-dot size-1.5 rounded-full bg-glow" style={{ animationDelay: `${i * 0.15}s` }} />
+            ))}
+          </span>
+        </li>
+      )}
+    </ol>
+  );
+});
